@@ -59,6 +59,10 @@ Everything lives in `src/site.config.ts`:
 - **Ads** — set `ads.enabled = true` with your AdSense client and slot ids
 - **Code runner** — `playground.endpoint` defaults to the free [Wandbox](https://wandbox.org) API (Java 21). Point it at a self-hosted runner with the same API to remove the third-party dependency.
 
+## Deployment
+
+The site is hosted on Vercel at <https://stackwise-rosy.vercel.app>. The project is connected to this GitHub repo: every push to `main` deploys to production, and other branches and pull requests get preview URLs. `vercel.json` makes Vercel run `npm run build` so the Pagefind index is included.
+
 ## Progress tracking
 
 Completed lessons, bookmarks, quiz scores and "I know this" interview marks are stored in the visitor's browser (`localStorage`); nothing is sent to a server.
