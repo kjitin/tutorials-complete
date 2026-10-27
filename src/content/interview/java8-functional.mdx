@@ -1,0 +1,147 @@
+---
+title: Java 8+ — Lambdas, Streams & Optional
+description: Functional interfaces, method references, the Stream API, collectors and Optional — including the classic live-coding questions.
+track: java
+order: 3
+---
+
+## Lambdas and functional interfaces
+
+<QA q="What is a functional interface? Name some built-in ones." level="easy">
+
+An interface with **exactly one abstract method** (default/static methods don't count, nor do abstract methods matching `Object`'s public methods). It can be implemented with a lambda or method reference; `@FunctionalInterface` makes the compiler enforce it.
+
+Built-ins: `Supplier`, `Consumer`, `Function`, `Predicate`, `UnaryOperator`, `BinaryOperator`, `BiFunction`, primitive variants like `IntPredicate`, and older ones such as `Runnable`, `Callable` and `Comparator`.
+
+</QA>
+
+<QA q="Why must variables captured by a lambda be effectively final?" level="medium">
+
+The lambda captures the **value**, not the variable. Locals live on a stack frame that may be gone when the lambda runs, possibly on another thread. Allowing mutation would mean sharing the variable across frames and threads — confusing semantics and data races. Use a stream reduction, a field or an `AtomicInteger`.
+
+</QA>
+
+<QA q="Lambda vs anonymous inner class — what are the differences?" level="medium">
+
+- `this` in a lambda is the **enclosing** instance; in an anonymous class it's the anonymous object.
+- Lambdas only implement **functional interfaces**; anonymous classes can extend classes.
+- Lambdas don't introduce a new scope (no shadowing locals).
+- Lambdas compile to `invokedynamic` + `LambdaMetafactory` (no extra class file; non-capturing lambdas are reused).
+
+</QA>
+
+<QA q="What are the four kinds of method references?" level="easy">
+
+1. Static — `Integer::parseInt`
+2. Bound instance — `System.out::println`
+3. Unbound instance (receiver is the first argument) — `String::toUpperCase`, `String::compareToIgnoreCase` as a `Comparator<String>`
+4. Constructor — `ArrayList::new`, `int[]::new`
+
+</QA>
+
+## Streams
+
+<QA q="Intermediate vs terminal operations — and what does lazy evaluation mean?" level="easy">
+
+**Intermediate** operations (`filter`, `map`, `flatMap`, `sorted`, `limit`) return a new stream and do nothing until a **terminal** operation (`collect`, `toList`, `forEach`, `reduce`, `count`, `findFirst`) runs. Elements then flow one at a time; short-circuiting operations stop early, which is why `Stream.iterate(1, n -> n + 1).filter(...).limit(5)` terminates on an infinite source.
+
+</QA>
+
+<QA q="map vs flatMap?" level="easy">
+
+`map` produces exactly one output per element (`Stream<Order>` → `Stream<List<Line>>`). `flatMap` maps each element to a **stream** and flattens (`Stream<Order>` → `Stream<Line>`). `Optional` has the same distinction for functions that already return `Optional`.
+
+</QA>
+
+<QA q="Can a stream be reused?" level="easy">
+
+No — after a terminal operation it's consumed, and reuse throws `IllegalStateException: stream has already been operated upon or closed`. Create a new stream from the source or keep a `Supplier<Stream<T>>`.
+
+</QA>
+
+<QA q="Find the second highest salary from a list of employees using streams." level="medium">
+
+```java
+Optional<Double> second = employees.stream()
+    .map(Employee::salary)
+    .distinct()                              // ignore ties at the top
+    .sorted(Comparator.reverseOrder())
+    .skip(1)
+    .findFirst();
+```
+
+Call out `distinct()` and the `Optional` result for lists with fewer than two distinct salaries.
+
+</QA>
+
+<QA q="Count the frequency of each word in a sentence using streams." level="medium">
+
+```java
+Map<String, Long> freq = Arrays.stream(text.toLowerCase().split("\\W+"))
+    .filter(w -> !w.isBlank())
+    .collect(Collectors.groupingBy(Function.identity(), TreeMap::new, Collectors.counting()));
+```
+
+Variant — first non-repeated character: group chars into a `LinkedHashMap` with `counting()` and take the first entry with count 1.
+
+</QA>
+
+<QA q="Group employees by department: average salary and top earner." level="medium">
+
+```java
+Map<String, Double> avg = staff.stream()
+    .collect(groupingBy(Employee::dept, averagingDouble(Employee::salary)));
+
+Map<String, String> top = staff.stream().collect(groupingBy(Employee::dept,
+    collectingAndThen(maxBy(comparingDouble(Employee::salary)), o -> o.map(Employee::name).orElse("-"))));
+```
+
+</QA>
+
+<QA q="What happens with Collectors.toMap if two elements have the same key?" level="medium">
+
+It throws **`IllegalStateException: Duplicate key`**. Supply a merge function — `toMap(k, v, (a, b) -> a)` or `Integer::sum` — and optionally a map factory (`LinkedHashMap::new`). `toMap` also throws on null values.
+
+</QA>
+
+<QA q="When should you NOT use parallel streams?" level="hard">
+
+- Small data sets — overhead dominates
+- Sources that split poorly (`LinkedList`, `Stream.iterate`, I/O)
+- **Blocking I/O** — it runs on the JVM-wide `ForkJoinPool.commonPool()`
+- Order-sensitive operations (`limit`, `findFirst`, `sorted`) on ordered streams
+- Shared mutable state
+
+Benchmark with JMH; for I/O fan-out use virtual threads or `CompletableFuture` with a dedicated executor.
+
+</QA>
+
+<QA q="stream.toList() vs collect(Collectors.toList())?" level="easy">
+
+`Stream.toList()` (Java 16) returns an **unmodifiable** list. `Collectors.toList()` makes no guarantee about type or mutability (currently an `ArrayList`). Use `toCollection(ArrayList::new)` when you need mutability explicitly.
+
+</QA>
+
+## Optional and Date/Time
+
+<QA q="What is Optional for, and where should you NOT use it?" level="medium">
+
+It's a **return type** that makes "no result" explicit and enables fluent handling (`map`, `filter`, `orElseGet`, `orElseThrow`). Don't use it for **fields** (not serializable, extra allocation), **parameters** (callers can still pass null) or **collections** (return an empty one). Avoid `isPresent()` + `get()`.
+
+</QA>
+
+<QA q="orElse vs orElseGet?" level="medium">
+
+`orElse(value)` **always** evaluates its argument, even when a value is present. `orElseGet(supplier)` evaluates only when empty. With an expensive or side-effecting default, `orElse` is a hidden bug.
+
+</QA>
+
+<QA q="LocalDateTime vs ZonedDateTime vs Instant?" level="medium">
+
+- `Instant` — a point on the UTC timeline (timestamps, persistence).
+- `ZonedDateTime` — date-time plus zone **and DST rules** (scheduling for a user).
+- `LocalDateTime` — no zone, so not a point in time; fine for wall-clock values like "09:00 every Monday".
+
+Store UTC; convert at the edges. All `java.time` types are immutable and thread-safe.
+
+</QA>

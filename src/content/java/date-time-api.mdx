@@ -1,0 +1,112 @@
+---
+title: Date & Time API
+description: LocalDate, ZonedDateTime, Instant, Duration, Period and formatting — the java.time API and how to avoid time-zone bugs.
+group: Functional Java (Java 8+)
+order: 6
+level: beginner
+tags: [java8, java-time]
+---
+
+## Why java.time?
+
+The legacy `java.util.Date` and `Calendar` were mutable (not thread-safe), had months starting at 0, mixed date and time-zone concerns, and `SimpleDateFormat` wasn't thread-safe either. Java 8's `java.time` (JSR-310) fixes all of this: every type is **immutable, thread-safe and explicit** about what it represents.
+
+## Choosing the right type
+
+| Type | Represents | Example | Use for |
+| --- | --- | --- | --- |
+| `LocalDate` | A date, no time, no zone | `2026-10-26` | Birthdays, holidays, due dates |
+| `LocalTime` | A time of day | `09:30` | Opening hours |
+| `LocalDateTime` | Date + time, **no zone** | `2026-10-26T09:30` | Rarely right for storage — ambiguous |
+| `ZonedDateTime` | Date + time + zone rules | `2026-10-26T09:30+00:00[Europe/London]` | Scheduling in a user's time zone |
+| `OffsetDateTime` | Date + time + fixed offset | `2026-10-26T09:30+01:00` | API payloads, DB `timestamptz` |
+| `Instant` | A point on the UTC timeline | `2026-10-26T09:30:00Z` | Timestamps, logs, events |
+| `Duration` | Time-based amount | `PT2H30M` | Timeouts, elapsed time |
+| `Period` | Date-based amount | `P1Y2M3D` | "3 months from today" |
+
+<Callout type="tip" title="Rule of thumb">
+Store and transmit **`Instant`** (or `OffsetDateTime` in UTC). Convert to `ZonedDateTime` only at the edges — when displaying to a user or interpreting their input in their zone.
+</Callout>
+
+## Hands-on
+
+<Playground title="DateTime.java">
+
+```java
+import java.time.*;
+import java.time.format.*;
+import java.time.temporal.*;
+
+class Main {
+    public static void main(String[] args) {
+        LocalDate release = LocalDate.of(2023, Month.SEPTEMBER, 19);   // Java 21 GA
+        LocalDate today = LocalDate.of(2026, 10, 26);
+
+        // Immutable arithmetic — each call returns a new object
+        System.out.println("Next LTS (+2y):   " + release.plusYears(2));
+        System.out.println("End of month:     " + today.with(TemporalAdjusters.lastDayOfMonth()));
+        System.out.println("Next Monday:      " + today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)));
+        System.out.println("Days since 21 GA: " + ChronoUnit.DAYS.between(release, today));
+        Period p = Period.between(release, today);
+        System.out.println("Period:           " + p.getYears() + "y " + p.getMonths() + "m " + p.getDays() + "d");
+
+        // Time zones and DST: 1 day != 24 hours across a DST change
+        ZoneId london = ZoneId.of("Europe/London");
+        ZonedDateTime beforeDst = ZonedDateTime.of(2026, 10, 24, 12, 0, 0, 0, london);  // clocks go back 25 Oct
+        System.out.println("plusDays(1):      " + beforeDst.plusDays(1));
+        System.out.println("plus 24 hours:    " + beforeDst.plus(Duration.ofHours(24)));
+
+        // The same instant in different zones
+        Instant launch = Instant.parse("2026-10-26T15:00:00Z");
+        for (String z : new String[]{"America/New_York", "Europe/Berlin", "Asia/Kolkata", "Australia/Sydney"}) {
+            System.out.printf("  %-18s %s%n", z, launch.atZone(ZoneId.of(z)).toLocalDateTime());
+        }
+
+        // Duration for elapsed time
+        Duration timeout = Duration.ofMinutes(90).plusSeconds(15);
+        System.out.println("Timeout:          " + timeout + " = " + timeout.toMinutes() + " min");
+
+        // Formatting and parsing (DateTimeFormatter is immutable and thread-safe)
+        DateTimeFormatter uk = DateTimeFormatter.ofPattern("EEEE d MMMM uuuu, HH:mm");
+        System.out.println("Formatted:        " + launch.atZone(london).format(uk));
+        LocalDate parsed = LocalDate.parse("26/10/2026", DateTimeFormatter.ofPattern("dd/MM/uuuu"));
+        System.out.println("Parsed:           " + parsed + " (" + parsed.getDayOfWeek() + ")");
+        System.out.println("ISO:              " + DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(launch.atOffset(ZoneOffset.UTC)));
+    }
+}
+```
+
+</Playground>
+
+## Testable time: inject a Clock
+
+Calling `LocalDate.now()` directly makes code untestable. Inject a `java.time.Clock` instead:
+
+```java
+@Service
+class SubscriptionService {
+    private final Clock clock;
+    SubscriptionService(Clock clock) { this.clock = clock; }
+
+    boolean isExpired(Subscription s) {
+        return s.expiresAt().isBefore(Instant.now(clock));
+    }
+}
+
+// production: @Bean Clock clock() { return Clock.systemUTC(); }
+// tests:      new SubscriptionService(Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
+```
+
+## Persistence and JSON
+
+- **JPA/Hibernate** map `LocalDate`, `LocalDateTime`, `Instant`, `OffsetDateTime` natively. Prefer `Instant` or `OffsetDateTime` mapped to `TIMESTAMP WITH TIME ZONE`.
+- **Jackson** in Spring Boot serialises `java.time` types as ISO-8601 strings out of the box.
+- Converting legacy types: `date.toInstant()`, `Date.from(instant)`, `calendar.toZonedDateTime()`.
+
+<Callout type="warn" title="Format pattern gotchas">
+`yyyy` is *year-of-era* while `YYYY` is *week-based year* — `YYYY` prints the wrong year for dates in the last days of December. `uuuu` is the safest year pattern. Also `mm` is minutes and `MM` is months; `hh` is 12-hour, `HH` is 24-hour.
+</Callout>
+
+<Callout type="interview">
+Questions you may get: *“`LocalDateTime` vs `ZonedDateTime` vs `Instant`?”*, *“Why is `java.util.Date` considered broken?”* (mutable, poor API, not thread-safe formatting), *“`Duration` vs `Period`?”* (time-based vs date-based — `Period.ofDays(1)` respects DST, `Duration.ofDays(1)` is exactly 24h), and *“How do you test code that uses the current time?”* (inject a `Clock`).
+</Callout>

@@ -1,0 +1,65 @@
+---
+import Icon from '../Icon.astro';
+
+interface Props {
+  type?: 'tip' | 'info' | 'warn' | 'danger' | 'interview';
+  title?: string;
+}
+const { type = 'info', title } = Astro.props;
+const meta = {
+  tip: { icon: 'bulb', label: 'Tip' },
+  info: { icon: 'info', label: 'Note' },
+  warn: { icon: 'alert', label: 'Watch out' },
+  danger: { icon: 'alert', label: 'Pitfall' },
+  interview: { icon: 'briefcase', label: 'Interview angle' },
+}[type];
+---
+
+<aside class={`callout callout-${type}`}>
+  <div class="callout-title"><Icon name={meta.icon} size={16} /> {title ?? meta.label}</div>
+  <div class="callout-body"><slot /></div>
+</aside>
+
+<style>
+  .callout {
+    --c: var(--info);
+    margin: 1.5em 0;
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    background: color-mix(in srgb, var(--c) 7%, var(--surface));
+  }
+  .callout-tip {
+    --c: var(--ok);
+  }
+  .callout-warn {
+    --c: var(--warn);
+  }
+  .callout-danger {
+    --c: var(--err);
+  }
+  .callout-interview {
+    --c: #a855f7;
+  }
+  .callout-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 650;
+    font-size: 14px;
+    color: var(--c);
+    margin-bottom: 4px;
+  }
+  .callout-body {
+    font-size: 15px;
+  }
+  .callout-body > :global(* + *) {
+    margin-top: 0.7em;
+  }
+  .callout-body > :global(:first-child) {
+    margin-top: 0;
+  }
+  .callout-body > :global(:last-child) {
+    margin-bottom: 0;
+  }
+</style>

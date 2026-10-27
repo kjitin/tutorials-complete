@@ -1,0 +1,152 @@
+---
+title: Interfaces vs Abstract Classes
+description: Default, static and private interface methods, the diamond problem, functional interfaces — and how to choose between interface and abstract class.
+group: Fundamentals
+order: 3
+level: beginner
+tags: [oop, interfaces]
+---
+
+## Interfaces
+
+An **interface** is a contract: a set of method signatures a class promises to implement. Since Java 8 interfaces can also carry behaviour:
+
+| Member | Since | Notes |
+| --- | --- | --- |
+| Abstract methods | 1.0 | Implicitly `public abstract` |
+| Constants | 1.0 | Implicitly `public static final` |
+| `default` methods | 8 | Implementation inherited by implementors; can be overridden |
+| `static` methods | 8 | Called as `Interface.method()`; not inherited |
+| `private` methods | 9 | Share code between default methods |
+
+```java
+public interface Shape {
+    double area();                                   // abstract
+
+    default String describe() {                      // default
+        return "%s with area %.2f".formatted(name(), area());
+    }
+
+    static Shape unitSquare() { return () -> 1.0; }  // static factory
+
+    private String name() {                          // private helper
+        return getClass().getSimpleName();
+    }
+}
+```
+
+## Abstract classes
+
+An **abstract class** is a partially implemented class that can't be instantiated. Unlike interfaces, it can have **instance state**, **constructors**, and methods with any access level.
+
+```java
+public abstract class HttpHandler {
+    private final MeterRegistry metrics;            // state
+    protected HttpHandler(MeterRegistry m) { this.metrics = m; }
+
+    public final Response handle(Request r) {       // template method
+        metrics.counter("requests").increment();
+        return doHandle(r);
+    }
+    protected abstract Response doHandle(Request r);
+}
+```
+
+## How to choose
+
+| | Interface | Abstract class |
+| --- | --- | --- |
+| Multiple inheritance | A class can implement many | A class can extend only one |
+| State (instance fields) | No | Yes |
+| Constructors | No | Yes |
+| Method access | `public` (or `private` helpers) | Any |
+| Relationship | **can-do** (capability) | **is-a** (shared identity) |
+| Evolving the API | Add `default` methods | Add concrete methods |
+
+<Callout type="tip" title="Rule of thumb">
+Start with an **interface** — it gives callers maximum flexibility and is easy to mock. Add an **abstract class** only when several implementations need to share state or a fixed algorithm (often as a *skeletal implementation* alongside the interface, like `List` + `AbstractList`).
+</Callout>
+
+## The diamond problem
+
+If a class inherits the same `default` method from two interfaces, the compiler forces it to resolve the conflict explicitly:
+
+<Playground title="Diamond.java">
+
+```java
+interface Camera {
+    default String capture() { return "photo"; }
+}
+
+interface Phone {
+    default String capture() { return "voice memo"; }
+}
+
+class Smartphone implements Camera, Phone {
+    // Without this override: "class Smartphone inherits unrelated defaults for capture()"
+    @Override
+    public String capture() {
+        return Camera.super.capture() + " + " + Phone.super.capture();
+    }
+}
+
+abstract class Device {
+    public String capture() { return "device capture"; }
+}
+
+class ActionCam extends Device implements Camera {
+    // No conflict: a class method always wins over an interface default ("class wins" rule)
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println(new Smartphone().capture());
+        System.out.println(new ActionCam().capture());
+    }
+}
+```
+
+</Playground>
+
+The resolution rules:
+
+1. **Classes win** — a method in the superclass chain takes priority over any interface default.
+2. **More specific interfaces win** — if `B extends A` and both define the default, `B`'s is used.
+3. Otherwise the class **must override** and may delegate with `X.super.method()`.
+
+## Functional interfaces
+
+An interface with **exactly one abstract method** is a *functional interface* and can be implemented with a lambda. `@FunctionalInterface` makes the compiler enforce the single-abstract-method rule.
+
+```java
+@FunctionalInterface
+interface Validator<T> {
+    boolean validate(T value);
+
+    default Validator<T> and(Validator<T> other) {        // defaults don't count
+        return v -> validate(v) && other.validate(v);
+    }
+}
+
+Validator<String> notBlank = s -> !s.isBlank();
+Validator<String> shortEnough = s -> s.length() <= 20;
+boolean ok = notBlank.and(shortEnough).validate("Ada");
+```
+
+See [Lambdas & Functional Interfaces](/java/lambdas-functional-interfaces/) for the built-in ones (`Function`, `Predicate`, `Supplier`, `Consumer`…).
+
+## Sealed interfaces
+
+Since Java 17 you can restrict **which** classes may implement an interface with `sealed … permits`. This makes hierarchies closed and enables exhaustive pattern matching — see [Sealed Classes & Pattern Matching](/java/sealed-classes-pattern-matching/).
+
+```java
+public sealed interface Payment permits Card, BankTransfer, Wallet {}
+```
+
+## Marker interfaces
+
+Interfaces with **no methods** — `Serializable`, `Cloneable`, `RandomAccess` — tag a class with a capability checked at runtime via `instanceof`. Modern code often uses annotations instead, but marker interfaces have the advantage of being checked by the type system.
+
+<Callout type="interview">
+Common questions: *“Can an interface have a constructor?”* (no), *“Can an abstract class have no abstract methods?”* (yes — it just can't be instantiated, e.g. `HttpServlet`), *“Why were default methods added?”* (to evolve interfaces like `Collection` with `stream()` and `forEach()` in Java 8 without breaking every existing implementation).
+</Callout>

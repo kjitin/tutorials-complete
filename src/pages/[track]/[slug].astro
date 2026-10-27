@@ -1,0 +1,304 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import Toc from '../../components/Toc.astro';
+import Icon from '../../components/Icon.astro';
+import AdSlot from '../../components/AdSlot.astro';
+import { mdxComponents } from '../../components/mdx';
+import { TRACKS, trackById, type TrackId } from '../../site.config';
+import { getLessons, lessonKey, lessonUrl, type Lesson } from '../../lib/lessons';
+
+export async function getStaticPaths() {
+  const paths = [];
+  for (const track of TRACKS) {
+    const lessons = await getLessons(track.id);
+    for (const [i, lesson] of lessons.entries()) {
+      paths.push({
+        params: { track: track.id, slug: lesson.id },
+        props: { trackId: track.id, lesson, lessons, prev: lessons[i - 1], next: lessons[i + 1] },
+      });
+    }
+  }
+  return paths;
+}
+
+interface Props {
+  trackId: TrackId;
+  lesson: Lesson;
+  lessons: Lesson[];
+  prev?: Lesson;
+  next?: Lesson;
+}
+const { trackId, lesson, lessons, prev, next } = Astro.props;
+const track = trackById(trackId);
+const { Content, headings } = await render(lesson);
+const words = (lesson.body ?? '').split(/\s+/).length;
+const minutes = lesson.data.minutes ?? Math.max(3, Math.round(words / 220));
+const key = lessonKey(trackId, lesson.id);
+const index = lessons.indexOf(lesson);
+---
+
+<BaseLayout title={lesson.data.title} description={lesson.data.description} type="article">
+  <Sidebar slot="drawer" track={track} lessons={lessons} currentId={lesson.id} />
+
+  <div class="lesson-shell" style={`--accent:${track.accent}`}>
+    <aside class="left">
+      <div class="sticky"><Sidebar track={track} lessons={lessons} currentId={lesson.id} /></div>
+    </aside>
+
+    <article class="lesson">
+      <header class="lesson-head">
+        <div class="crumbs">
+          <a href={`/${track.id}/`}>{track.title}</a>
+          <Icon name="chevron-right" size={14} />
+          <span>{lesson.data.group}</span>
+        </div>
+        <h1>{lesson.data.title}</h1>
+        <p class="lede">{lesson.data.description}</p>
+        <div class="meta">
+          <span class={`chip level-${lesson.data.level}`}>{lesson.data.level}</span>
+          <span class="chip"><Icon name="clock" size={13} /> {minutes} min read</span>
+          <span class="chip">Lesson {index + 1} of {lessons.length}</span>
+          <span class="spacer"></span>
+          <button
+            class="btn btn-sm"
+            data-bookmark
+            data-key={key}
+            data-title={lesson.data.title}
+            data-url={lessonUrl(trackId, lesson.id)}
+            data-section={track.title}
+            aria-pressed="false"
+          >
+            <Icon name="bookmark" size={14} /> <span>Bookmark</span>
+          </button>
+        </div>
+      </header>
+
+      <div
+        class="prose"
+        data-pagefind-body
+        data-pagefind-meta={`section:${track.short === 'Patterns' ? 'Design Patterns' : track.short}`}
+      >
+        <span data-pagefind-filter="section" hidden>{track.short === 'Patterns' ? 'Design Patterns' : track.short}</span>
+        <Content components={mdxComponents} />
+      </div>
+
+      <AdSlot slot="inArticle" />
+
+      <div class="complete-card card">
+        <div>
+          <strong>Finished this lesson?</strong>
+          <p>Mark it complete to track your progress through {track.title}.</p>
+        </div>
+        <button class="btn btn-primary" data-complete data-key={key} aria-pressed="false">
+          <Icon name="check" size={16} /> <span>Mark as complete</span>
+        </button>
+      </div>
+
+      <nav class="pager" aria-label="Lesson navigation">
+        {
+          prev ? (
+            <a href={lessonUrl(trackId, prev.id)} class="pager-link card">
+              <span class="dir">
+                <Icon name="arrow-left" size={14} /> Previous
+              </span>
+              <span class="pt">{prev.data.title}</span>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next ? (
+            <a href={lessonUrl(trackId, next.id)} class="pager-link card next">
+              <span class="dir">
+                Next <Icon name="arrow-right" size={14} />
+              </span>
+              <span class="pt">{next.data.title}</span>
+            </a>
+          ) : (
+            <a href={`/quiz/`} class="pager-link card next">
+              <span class="dir">
+                Test yourself <Icon name="arrow-right" size={14} />
+              </span>
+              <span class="pt">Take a {track.short} quiz</span>
+            </a>
+          )
+        }
+      </nav>
+    </article>
+
+    <aside class="right">
+      <div class="sticky"><Toc headings={headings} /></div>
+    </aside>
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../../scripts/progress';
+
+  const completeBtn = document.querySelector<HTMLButtonElement>('[data-complete]')!;
+  const bookmarkBtn = document.querySelector<HTMLButtonElement>('[data-bookmark]')!;
+
+  function paint() {
+    const done = progress.isDone(completeBtn.dataset.key!);
+    completeBtn.setAttribute('aria-pressed', String(done));
+    completeBtn.querySelector('span')!.textContent = done ? 'Completed' : 'Mark as complete';
+    const marked = progress.isBookmarked(bookmarkBtn.dataset.key!);
+    bookmarkBtn.setAttribute('aria-pressed', String(marked));
+    bookmarkBtn.querySelector('span')!.textContent = marked ? 'Bookmarked' : 'Bookmark';
+  }
+
+  completeBtn.addEventListener('click', () => progress.toggleDone(completeBtn.dataset.key!));
+  bookmarkBtn.addEventListener('click', () => {
+    const { key, title, url, section } = bookmarkBtn.dataset;
+    progress.toggleBookmark({ key: key!, title: title!, url: url!, section: section! });
+  });
+  window.addEventListener('jf:progress', paint);
+  paint();
+</script>
+
+<style>
+  .lesson-shell {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr) 220px;
+    gap: 48px;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+  .sticky {
+    position: sticky;
+    top: calc(var(--header-h) + 28px);
+    max-height: calc(100dvh - var(--header-h) - 40px);
+    overflow-y: auto;
+    padding-bottom: 24px;
+    scrollbar-width: thin;
+  }
+  .left,
+  .right {
+    padding-top: 36px;
+  }
+  .lesson {
+    min-width: 0;
+    max-width: 780px;
+    padding-top: 36px;
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .crumbs a {
+    color: var(--accent);
+    font-weight: 550;
+  }
+  h1 {
+    font-size: clamp(30px, 4.4vw, 42px);
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+    margin: 0 0 14px;
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--text-soft);
+    margin: 0 0 20px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 24px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .meta [class*='level-'] {
+    text-transform: capitalize;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .complete-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 56px;
+    padding: 20px 22px;
+  }
+  .complete-card p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .complete-card .btn[aria-pressed='true'] {
+    background: var(--ok);
+    color: #fff;
+    box-shadow: none;
+  }
+  .pager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .pager-link {
+    display: grid;
+    gap: 4px;
+    padding: 16px 18px;
+    transition: border-color 0.15s;
+  }
+  .pager-link:hover {
+    border-color: var(--accent);
+  }
+  .pager-link.next {
+    text-align: right;
+  }
+  .dir {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .next .dir {
+    justify-content: flex-end;
+  }
+  .pt {
+    font-weight: 600;
+    color: var(--text);
+  }
+  @media (max-width: 1240px) {
+    .lesson-shell {
+      grid-template-columns: 250px minmax(0, 1fr);
+    }
+    .right {
+      display: none;
+    }
+  }
+  @media (max-width: 960px) {
+    .lesson-shell {
+      display: block;
+      padding: 0 16px;
+    }
+    .left {
+      display: none;
+    }
+    .lesson {
+      margin: 0 auto;
+      padding-top: 24px;
+    }
+    .complete-card {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .pager {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

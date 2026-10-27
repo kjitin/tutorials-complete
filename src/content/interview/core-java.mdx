@@ -1,0 +1,171 @@
+---
+title: Core Java & OOP
+description: OOP, the type system, String, equals/hashCode, exceptions and the language fundamentals every Java interview starts with.
+track: java
+order: 1
+---
+
+## Language basics
+
+<QA q="Is Java pass-by-value or pass-by-reference?" level="easy">
+
+Java is **always pass-by-value**. For objects, the value that's copied is the **reference** — a method can mutate the object the caller passed, but reassigning the parameter doesn't affect the caller's variable.
+
+```java
+void mutate(List<String> list) { list.add("x"); }            // caller sees "x"
+void reassign(List<String> list) { list = new ArrayList<>(); } // caller unaffected
+```
+
+</QA>
+
+<QA q="What is the difference between JDK, JRE and JVM?" level="easy">
+
+- **JVM** — executes bytecode (class loading, JIT, GC).
+- **JRE** — JVM + core libraries needed to *run* programs.
+- **JDK** — JRE + development tools (`javac`, `jar`, `jshell`, `jcmd`, `jlink`).
+
+Modern distributions ship the JDK; build minimal runtimes with `jlink`.
+
+</QA>
+
+<QA q="What are the four pillars of OOP? Give a Java example of each." level="easy">
+
+- **Encapsulation** — private fields behind methods that protect invariants (`withdraw` rejects overdrafts).
+- **Inheritance** — `class Motorbike extends Vehicle`.
+- **Polymorphism** — a `List<Employee>` of `Salaried` and `Hourly`; `monthlyPay()` dispatches on the runtime type.
+- **Abstraction** — a `PaymentGateway` interface hides whether Stripe or PayPal is used.
+
+Mention *composition over inheritance* to show maturity.
+
+</QA>
+
+<QA q="Overloading vs overriding — which is resolved at compile time?" level="medium">
+
+| | Overloading | Overriding |
+| --- | --- | --- |
+| Signature | Same name, **different parameters** | Same name **and** parameters |
+| Resolved | **Compile time**, by static argument types | **Runtime**, by the object's class |
+| Return type | Can differ | Same or covariant |
+
+Trap: with `print(Employee)` and `print(Salaried)`, calling `print(e)` where `e` is declared `Employee` but holds a `Salaried` picks the **Employee** overload.
+
+</QA>
+
+<QA q="Can you override a static or private method?" level="medium">
+
+No. **Static** methods are *hidden* — bound to the declared type at compile time. **Private** methods aren't visible to subclasses, so a same-named method in a subclass is unrelated. `final` methods can't be overridden either.
+
+</QA>
+
+<QA q="What does final mean on a variable, a method and a class?" level="easy">
+
+- **Variable** — assigned once. For references the *reference* is fixed; the object can still change.
+- **Method** — cannot be overridden.
+- **Class** — cannot be extended (`String`, records).
+
+`final` fields also get JMM safe-publication guarantees after construction.
+
+</QA>
+
+<QA q="Interface vs abstract class — when would you use each?" level="medium">
+
+An **interface** defines a capability that unrelated classes can implement (many per class); it can have `default`, `static` and `private` methods but no instance state. An **abstract class** fits when implementations share **state**, constructors or a fixed algorithm (template method) in a true *is-a* relationship; a class extends only one. A common combination is interface + skeletal implementation (`List` + `AbstractList`).
+
+</QA>
+
+<QA q="What is the diamond problem and how does Java resolve it with default methods?" level="medium">
+
+If a class inherits the same `default` method from two interfaces, Java applies: (1) **class methods win**; (2) the more **specific interface** wins; (3) otherwise the class **must override**, optionally delegating with `InterfaceA.super.method()`. There's no state diamond because interfaces have no instance fields.
+
+</QA>
+
+## Strings and objects
+
+<QA q="Why is String immutable in Java?" level="medium">
+
+- **String pool** — literals can be shared safely.
+- **Security** — class names, paths, URLs and credentials can't change after validation.
+- **Thread safety** — no synchronisation needed.
+- **Hash caching** — `hashCode` computed once; ideal map keys.
+
+</QA>
+
+<QA q="What is the difference between == and equals()?" level="easy">
+
+`==` compares **references** for objects (values for primitives). `equals()` compares **logical equality** defined by the class. Always use `equals` for strings and boxed numbers — the `Integer` cache makes `==` appear to work for -128..127 and then fail at 128.
+
+</QA>
+
+<QA q="How many objects does new String('hello') create?" level="medium">
+
+Up to **two**: the pooled literal `"hello"` (if not already in the pool) and a **new** heap `String`. `new String(...)` always creates a distinct object; `.intern()` returns the pooled one.
+
+</QA>
+
+<QA q="String vs StringBuilder vs StringBuffer?" level="easy">
+
+`String` is immutable. `StringBuilder` is mutable and unsynchronised — use it in loops. `StringBuffer` is the synchronised legacy variant. Single-expression `+` concatenation is fine; the compiler optimises it via `invokedynamic`.
+
+</QA>
+
+<QA q="What is the contract between equals() and hashCode()? What breaks if you violate it?" level="medium">
+
+Equal objects **must** have equal hash codes; unequal ones *may* collide. `equals` must be reflexive, symmetric, transitive, consistent and false for `null`. Override `equals` without `hashCode` and `HashSet.contains` returns `false` for an equal object, because it looks in a different bucket. Records generate a correct pair.
+
+</QA>
+
+<QA q="How do you create an immutable class?" level="medium">
+
+1. Make the class `final` (or use a `record`).
+2. All fields `private final`.
+3. No setters; "modifiers" return new instances.
+4. **Defensively copy** mutable inputs and never expose internal mutable state (`List.copyOf`).
+5. Don't let `this` escape during construction.
+
+</QA>
+
+<QA q="What is the difference between Comparable and Comparator?" level="easy">
+
+`Comparable<T>` is the type's single **natural ordering** (`compareTo`, implemented by the class). `Comparator<T>` is any number of **external** orderings, composable with `comparing(...).thenComparing(...)`. Keep `compareTo` consistent with `equals`; sorted collections use it to detect duplicates.
+
+</QA>
+
+## Exceptions and generics
+
+<QA q="Checked vs unchecked exceptions — which should you use?" level="medium">
+
+**Checked** exceptions must be caught or declared — meant for recoverable conditions such as I/O. **Unchecked** (`RuntimeException`) signal programming errors. `Error` is for JVM problems. Modern code leans unchecked: checked exceptions don't compose with lambdas and leak details through `throws` — which is why Spring wraps persistence errors in unchecked `DataAccessException`s.
+
+</QA>
+
+<QA q="What does try-with-resources do, and what are suppressed exceptions?" level="medium">
+
+`AutoCloseable` resources declared in `try (...)` are closed automatically in **reverse** order. If both the body and `close()` throw, the body's exception propagates and the `close()` failure is attached as **suppressed** (`getSuppressed()`) rather than masking the original.
+
+</QA>
+
+<QA q="Does finally always execute? Can it change the return value?" level="hard">
+
+Almost always — except on `System.exit`, a killed thread or a JVM crash. A `return` in `finally` **overrides** the earlier return and **swallows** exceptions — never do it. Mutating a returned *object* in `finally` is visible to the caller; reassigning a returned *primitive* local is not, because the value was already evaluated.
+
+</QA>
+
+<QA q="What is type erasure, and what are its consequences?" level="hard">
+
+Generic types exist only at compile time; the compiler inserts casts and erases type parameters to their bounds, so `List<String>` and `List<Integer>` are the same class at runtime. Consequences: no `new T()`, no `new T[]`, no `instanceof List<String>`, no overloads differing only by type argument, no primitives as type arguments. Workarounds: `Class<T>` tokens, `Supplier<T>`, or super type tokens like `ParameterizedTypeReference`.
+
+</QA>
+
+<QA q="Explain PECS with an example." level="hard">
+
+**Producer `extends`, Consumer `super`**: read from `? extends T`, write to `? super T`.
+
+```java
+static <T> void copy(List<? extends T> src, List<? super T> dst) {
+    for (T t : src) dst.add(t);
+}
+```
+
+`copy(List<Integer>, List<Number>)` compiles. `Collections.copy` and `Comparator<? super T>` follow the rule.
+
+</QA>

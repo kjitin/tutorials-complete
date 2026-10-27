@@ -1,0 +1,168 @@
+---
+title: Optional Done Right
+description: What Optional is for, the idiomatic API, the anti-patterns to avoid and where not to use it.
+group: Functional Java (Java 8+)
+order: 5
+level: beginner
+tags: [java8, optional, null-safety]
+---
+
+## The purpose
+
+`Optional<T>` is a container that holds **either a value or nothing**. It was designed for one job: as a **method return type** that makes "there may be no result" explicit in the signature, so callers are forced to deal with absence instead of tripping over `null`.
+
+```java
+Optional<User> findByEmail(String email);   // the signature tells you it can be empty
+```
+
+## Creating Optionals
+
+```java
+Optional.of(value);          // value must be non-null, else NPE
+Optional.ofNullable(maybe);  // empty if null
+Optional.empty();
+```
+
+## The idiomatic API
+
+<Playground title="OptionalDemo.java">
+
+```java
+import java.util.*;
+
+record Address(String city, String postcode) {}
+record User(String name, String email, Address address) {}
+
+class UserRepository {
+    private final Map<String, User> users = Map.of(
+        "ada@example.com", new User("Ada", "ada@example.com", new Address("London", "N1 9GU")),
+        "bob@example.com", new User("Bob", "bob@example.com", null));
+
+    Optional<User> findByEmail(String email) { return Optional.ofNullable(users.get(email)); }
+}
+
+class Main {
+    public static void main(String[] args) {
+        var repo = new UserRepository();
+
+        // map / flatMap chain through possibly-missing values
+        String city = repo.findByEmail("ada@example.com")
+            .map(User::address)
+            .map(Address::city)
+            .orElse("Unknown");
+        System.out.println("Ada's city:   " + city);
+
+        String bobCity = repo.findByEmail("bob@example.com")
+            .map(User::address)              // null address -> empty Optional
+            .map(Address::city)
+            .orElse("Unknown");
+        System.out.println("Bob's city:   " + bobCity);
+
+        // filter
+        boolean londoner = repo.findByEmail("ada@example.com")
+            .map(User::address).filter(a -> a.city().equals("London")).isPresent();
+        System.out.println("Londoner?     " + londoner);
+
+        // ifPresentOrElse (Java 9)
+        repo.findByEmail("cy@example.com").ifPresentOrElse(
+            u -> System.out.println("Found " + u.name()),
+            () -> System.out.println("No user cy@example.com"));
+
+        // or (Java 9): fall back to another Optional-returning lookup
+        User user = repo.findByEmail("missing@example.com")
+            .or(() -> repo.findByEmail("bob@example.com"))
+            .orElseThrow();
+        System.out.println("Fallback:     " + user.name());
+
+        // orElse vs orElseGet: orElse ALWAYS evaluates its argument
+        repo.findByEmail("ada@example.com").orElse(expensiveDefault("orElse"));
+        repo.findByEmail("ada@example.com").orElseGet(() -> expensiveDefault("orElseGet"));
+
+        // orElseThrow with a domain exception
+        try {
+            repo.findByEmail("nobody@example.com").orElseThrow(() -> new NoSuchElementException("User not found"));
+        } catch (NoSuchElementException e) { System.out.println("Thrown:       " + e.getMessage()); }
+
+        // stream() (Java 9): drop empties from a list of Optionals
+        List<String> names = List.of("ada@example.com", "x@example.com", "bob@example.com").stream()
+            .map(repo::findByEmail).flatMap(Optional::stream).map(User::name).toList();
+        System.out.println("Found names:  " + names);
+    }
+
+    static User expensiveDefault(String via) {
+        System.out.println("  expensiveDefault() called via " + via);
+        return new User("default", "", null);
+    }
+}
+```
+
+</Playground>
+
+Notice that `orElse(...)` called `expensiveDefault` even though the value was present. **Use `orElseGet(supplier)` when the default is costly** (a database call, object creation).
+
+## Anti-patterns
+
+<CodeTabs labels={["Don't", "Do"]}>
+
+```java
+// 1. isPresent + get is just a verbose null check
+Optional<User> u = repo.findById(id);
+if (u.isPresent()) {
+    send(u.get().email());
+}
+
+// 2. Returning null from a method declared to return Optional
+Optional<User> find(long id) { return null; }
+
+// 3. Optional fields, parameters and collections
+class Order { private Optional<String> note; }
+void ship(Optional<Address> address) { }
+Optional<List<Item>> items();
+
+// 4. Optional.of with a value that might be null
+Optional.of(map.get(key));
+```
+
+```java
+// 1. Use the functional API
+repo.findById(id).map(User::email).ifPresent(this::send);
+
+// 2. Return Optional.empty()
+Optional<User> find(long id) { return Optional.empty(); }
+
+// 3. Nullable field + Optional getter; overloads; empty collections
+class Order {
+    private String note;                                  // may be null
+    Optional<String> note() { return Optional.ofNullable(note); }
+}
+void ship(Address address) { } void ship() { }
+List<Item> items();                                      // return List.of(), never null
+
+// 4. ofNullable
+Optional.ofNullable(map.get(key));
+```
+
+</CodeTabs>
+
+<Callout type="warn" title="Where not to use Optional">
+- **Fields** — `Optional` isn't `Serializable` and adds an allocation per object. JPA entities shouldn't have `Optional` fields.
+- **Method parameters** — callers can still pass `null` for the Optional itself; use overloads instead.
+- **Collections** — an empty collection already means "nothing". `Optional<List<T>>` is double wrapping.
+- **Performance-critical code** — use `OptionalInt`/`OptionalLong`/`OptionalDouble` for primitives, or plain `null` checks in tight loops.
+</Callout>
+
+## Optional in Spring
+
+Spring Data repositories return `Optional<T>` from `findById` and from derived queries like `Optional<User> findByEmail(String email)`. A common service-layer pattern:
+
+```java
+public UserDto getUser(Long id) {
+    return userRepository.findById(id)
+        .map(UserDto::from)
+        .orElseThrow(() -> new UserNotFoundException(id));   // mapped to 404 by an @RestControllerAdvice
+}
+```
+
+<Callout type="interview">
+*“Why was `Optional` introduced and where should it be used?”* — to make absence explicit in **return types** and enable fluent handling. Not for fields or parameters. Follow-ups: the `orElse` vs `orElseGet` evaluation difference, and why `Optional.get()` is discouraged (Java 10 added `orElseThrow()` as the explicit, no-arg alternative).
+</Callout>

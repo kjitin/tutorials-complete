@@ -1,0 +1,179 @@
+---
+title: var, Switch Expressions & Text Blocks
+description: The everyday Java 10–17 language improvements — local type inference, arrow switches that return values, and multi-line strings.
+group: Modern Java (17–21)
+order: 1
+level: beginner
+tags: [java17, syntax]
+---
+
+## Java's release cadence
+
+Since Java 9, a new version ships **every six months**, with a **Long-Term Support (LTS)** release every two years: **11**, **17**, **21** and **25**. Most production code targets an LTS. This track uses **Java 21**, and notes when something needs a later release.
+
+| Version | Highlights |
+| --- | --- |
+| 10 | `var` |
+| 11 (LTS) | `String` helpers, `HttpClient`, single-file `java Main.java` |
+| 14 | Switch expressions, helpful NPE messages |
+| 15 | Text blocks |
+| 16 | Records, `instanceof` pattern matching, `Stream.toList()` |
+| 17 (LTS) | Sealed classes |
+| 21 (LTS) | Virtual threads, pattern matching for `switch`, record patterns, sequenced collections |
+| 25 (LTS) | Flexible constructor bodies, compact source files, scoped values |
+
+## var — local variable type inference (Java 10)
+
+`var` lets the compiler infer a **local variable's** type from its initialiser. The variable is still statically typed — `var` is not `dynamic`.
+
+```java
+var orders = new HashMap<String, List<Order>>();   // HashMap<String, List<Order>>
+var reader = Files.newBufferedReader(path);        // BufferedReader
+for (var entry : orders.entrySet()) { ... }        // Map.Entry<String, List<Order>>
+try (var in = new FileInputStream(file)) { ... }
+```
+
+Where `var` **can't** be used: fields, method parameters, return types, without an initialiser (`var x;`), with `null` (`var x = null;`), or with an array initialiser (`var a = {1, 2};`).
+
+<Callout type="tip" title="When to use var">
+Use it when the type is **obvious from the right-hand side** (`var user = new User(...)`) or the full type is noise (`var groups = stream.collect(groupingBy(...))`). Avoid it when it hides important information: `var result = service.process();` — what is `result`?
+</Callout>
+
+## Switch expressions (Java 14)
+
+The new **arrow form** of `switch` doesn't fall through, can **return a value**, and is **exhaustive** when used as an expression.
+
+<CodeTabs labels={["Old statement switch", "Switch expression"]}>
+
+```java
+int days;
+switch (month) {
+    case FEBRUARY:
+        days = leap ? 29 : 28;
+        break;
+    case APRIL:
+    case JUNE:
+    case SEPTEMBER:
+    case NOVEMBER:
+        days = 30;
+        break;
+    default:
+        days = 31;          // forgetting a break here = bug
+}
+```
+
+```java
+int days = switch (month) {
+    case FEBRUARY -> leap ? 29 : 28;
+    case APRIL, JUNE, SEPTEMBER, NOVEMBER -> 30;
+    default -> 31;
+};
+```
+
+</CodeTabs>
+
+Use `yield` to return from a block:
+
+```java
+String category = switch (statusCode / 100) {
+    case 2 -> "success";
+    case 4 -> {
+        log.warn("Client error {}", statusCode);
+        yield "client-error";
+    }
+    case 5 -> "server-error";
+    default -> "other";
+};
+```
+
+## Text blocks (Java 15)
+
+A **text block** is a multi-line string literal delimited by `"""`. Incidental indentation (the common leading whitespace) is stripped automatically, so you can indent it with your code.
+
+<Playground title="ModernSyntax.java">
+
+```java
+import java.time.*;
+import java.util.*;
+
+class Main {
+    enum Status { DRAFT, SUBMITTED, APPROVED, REJECTED }
+
+    static String badge(Status s) {
+        return switch (s) {                 // exhaustive: no default needed for enums
+            case DRAFT -> "⚪ draft";
+            case SUBMITTED -> "🟡 pending review";
+            case APPROVED -> "🟢 approved";
+            case REJECTED -> "🔴 rejected";
+        };
+    }
+
+    static int daysIn(Month m, boolean leap) {
+        return switch (m) {
+            case FEBRUARY -> leap ? 29 : 28;
+            case APRIL, JUNE, SEPTEMBER, NOVEMBER -> 30;
+            default -> 31;
+        };
+    }
+
+    public static void main(String[] args) {
+        var statuses = EnumSet.allOf(Status.class);     // var infers EnumSet<Status>
+        for (var s : statuses) System.out.println(badge(s));
+
+        System.out.println("Feb 2028 has " + daysIn(Month.FEBRUARY, Year.isLeap(2028)) + " days");
+
+        var name = "Ada";
+        var role = "admin";
+        String json = """
+            {
+              "name": "%s",
+              "role": "%s",
+              "tags": ["java", "spring"]
+            }
+            """.formatted(name, role);
+        System.out.print(json);
+
+        String sql = """
+            SELECT o.id, o.total \
+            FROM orders o \
+            WHERE o.status = 'PAID'""";          // \ joins lines: no newline
+        System.out.println(sql);
+
+        String poem = """
+            Roses are red,\s
+            Violets are blue""";                  // \s keeps a trailing space
+        System.out.println(poem.lines().map(l -> "|" + l + "|").toList());
+    }
+}
+```
+
+</Playground>
+
+Text block escapes:
+
+- `\` at the end of a line — join with the next line (no newline)
+- `\s` — a single space that isn't stripped as trailing whitespace
+- The closing `"""` position controls indentation: put it on its own line at the content's indentation to keep a trailing newline
+
+## Pattern matching for instanceof (Java 16)
+
+No more cast after an `instanceof` check:
+
+```java
+// before
+if (obj instanceof String) {
+    String s = (String) obj;
+    System.out.println(s.length());
+}
+
+// Java 16+
+if (obj instanceof String s && !s.isBlank()) {
+    System.out.println(s.length());
+}
+```
+
+The binding `s` is in scope only where the match is definitely true. It is the gateway to the full pattern matching covered in [Sealed Classes & Pattern Matching](/java/sealed-classes-pattern-matching/).
+
+<Callout type="interview">
+*“Is `var` dynamic typing?”* — no, the type is inferred at compile time and fixed. *“What's the difference between a switch statement and a switch expression?”* — an expression produces a value, must be exhaustive, and the arrow form has no fall-through. Mentioning `yield` and multiple labels per case (`case A, B ->`) shows hands-on familiarity.
+</Callout>

@@ -1,0 +1,112 @@
+---
+title: Spring Security & Testing
+description: The security filter chain, authentication, JWT and OAuth2, method security, CSRF/CORS — and testing strategy with slices, @MockitoBean and Testcontainers.
+track: spring-boot
+order: 13
+---
+
+## Security
+
+<QA q="Authentication vs authorization?" level="easy">
+
+**Authentication** establishes *who* the caller is (password, token, certificate). **Authorization** decides *what* they may do (roles, scopes, ownership checks). In Spring Security, authentication filters populate the `SecurityContext`; the `AuthorizationFilter` and method security enforce access rules.
+
+</QA>
+
+<QA q="Explain the Spring Security filter chain architecture." level="hard">
+
+A servlet `DelegatingFilterProxy` hands requests to `FilterChainProxy`, which selects the first matching **`SecurityFilterChain`** bean. That chain runs an ordered list of filters — CORS, CSRF, authentication (form login, HTTP Basic, `BearerTokenAuthenticationFilter`), exception translation and finally `AuthorizationFilter`. Authentication filters delegate to an `AuthenticationManager`, which tries `AuthenticationProvider`s and stores the result in the thread-bound `SecurityContextHolder`.
+
+</QA>
+
+<QA q="How do you configure security in a modern Spring Boot app?" level="medium">
+
+Declare one or more `SecurityFilterChain` beans using the lambda DSL — `http.authorizeHttpRequests(auth -> auth.requestMatchers("/api/admin/**").hasRole("ADMIN").anyRequest().authenticated())`, plus `oauth2ResourceServer`, session policy, CSRF and CORS settings. `WebSecurityConfigurerAdapter` is long gone. Rules are evaluated top-down, first match wins; end with a deny-by-default rule.
+
+</QA>
+
+<QA q="hasRole vs hasAuthority?" level="easy">
+
+Both check `GrantedAuthority` strings. `hasRole("ADMIN")` checks for `ROLE_ADMIN` (the prefix is added for you); `hasAuthority("SCOPE_orders:write")` checks the exact string. JWT scopes become `SCOPE_…` authorities by default.
+
+</QA>
+
+<QA q="How should passwords be stored?" level="easy">
+
+Never in plain text or with fast hashes (MD5, SHA-256). Use an adaptive, salted algorithm — **bcrypt**, **scrypt** or **Argon2** — through a `PasswordEncoder`. `PasswordEncoderFactories.createDelegatingPasswordEncoder()` prefixes hashes with the algorithm id (`{bcrypt}`), enabling migration to stronger algorithms later.
+
+</QA>
+
+<QA q="How does JWT authentication work in a Spring resource server?" level="medium">
+
+`BearerTokenAuthenticationFilter` reads `Authorization: Bearer …`; a `JwtDecoder` verifies the **signature** with public keys from the issuer's JWKS endpoint (configured via `issuer-uri`) and validates `exp`, `nbf`, `iss` and `aud`. A `JwtAuthenticationConverter` maps claims to authorities. No server-side session is created.
+
+</QA>
+
+<QA q="How do you revoke a JWT?" level="hard">
+
+You can't directly — validation is stateless, so a token is valid until it expires. Mitigations: **short-lived access tokens** with rotating, revocable **refresh tokens**; **opaque tokens with introspection** where instant revocation matters; or a deny-list of token ids (`jti`) checked per request.
+
+</QA>
+
+<QA q="When is it safe to disable CSRF protection?" level="medium">
+
+CSRF attacks exploit credentials the browser sends **automatically** — cookies. For **stateless APIs authenticated with an `Authorization` header** (which browsers never attach on their own), disabling CSRF is safe. Keep it enabled for session/cookie-based browser apps, including BFFs that use session cookies.
+
+</QA>
+
+<QA q="What is CORS and how do you configure it?" level="medium">
+
+Cross-Origin Resource Sharing lets a server tell browsers which **other origins** may call it. Configure a `CorsConfigurationSource` with explicit allowed origins, methods and headers and enable `http.cors(...)`. Never combine `allowedOrigins("*")` with credentials. CORS is enforced by browsers — it isn't a server-side access control.
+
+</QA>
+
+<QA q="What does @PreAuthorize do and how is it enabled?" level="medium">
+
+With `@EnableMethodSecurity`, `@PreAuthorize("hasRole('ADMIN') or #id == authentication.name")` evaluates a SpEL expression **before** the method runs (`@PostAuthorize` checks the return value). It's implemented with AOP proxies, so self-invocation bypasses it.
+
+</QA>
+
+## Testing
+
+<QA q="@SpringBootTest vs @WebMvcTest vs @DataJpaTest?" level="easy">
+
+`@SpringBootTest` starts the **full** application context (optionally a real server). `@WebMvcTest` loads only the **web layer** — controllers, advice, converters, filters, security. `@DataJpaTest` loads only **JPA**: entities, repositories, migrations, `TestEntityManager`, each test rolled back. Slices are faster and more focused.
+
+</QA>
+
+<QA q="@MockBean was removed in Spring Boot 4 — what replaces it?" level="easy">
+
+`@MockitoBean` and `@MockitoSpyBean` from Spring Framework's test module (available since 6.2) replace Boot's `@MockBean` and `@SpyBean`. They register a Mockito mock or spy in place of the bean of that type in the test context.
+
+</QA>
+
+<QA q="@Mock vs @MockitoBean?" level="easy">
+
+`@Mock` (Mockito) creates a mock for plain unit tests — no Spring involved. `@MockitoBean` creates a mock **and registers it in the Spring application context**, replacing the real bean, for slice or integration tests.
+
+</QA>
+
+<QA q="Why use Testcontainers instead of H2 for repository tests?" level="medium">
+
+H2 differs from PostgreSQL/MySQL in SQL dialect, types (JSON, arrays), locking and constraints — tests can pass while production fails. Testcontainers runs the **real engine** in Docker. With `@ServiceConnection`, Boot derives the connection details from the container, and Flyway migrations are verified as part of the test.
+
+</QA>
+
+<QA q="How do you keep a Spring test suite fast?" level="medium">
+
+Push logic into plain **unit tests**; prefer **slices** over `@SpringBootTest`; rely on **context caching** by standardising test configurations (each unique combination of mocks/properties/profiles creates a new context); share Testcontainers via a common `@TestConfiguration`; use reuse locally; and parallelise in CI.
+
+</QA>
+
+<QA q="How do you test secured endpoints?" level="medium">
+
+Use `spring-security-test`: `@WithMockUser(roles = "ADMIN")`, or request post-processors with MockMvc — `.with(jwt().authorities(...))`, `.with(user("ada"))`, `.with(csrf())`. Import your real `SecurityConfig` into `@WebMvcTest` so tests exercise your actual rules, and cover 401 and 403 cases explicitly.
+
+</QA>
+
+<QA q="How do you test asynchronous behaviour, such as a Kafka listener?" level="hard">
+
+Run the real broker with Testcontainers, publish a message, then assert the side effect with **Awaitility**: `await().atMost(10, SECONDS).untilAsserted(() -> assertThat(repo.findById(id)).isPresent())`. Avoid `Thread.sleep`. For `@Async` methods returning `CompletableFuture`, `join()` with a timeout in the test.
+
+</QA>

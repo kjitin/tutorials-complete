@@ -1,0 +1,156 @@
+---
+title: "@Async, @Scheduled & Virtual Threads"
+description: Running work asynchronously and on a schedule in Spring Boot 4 — executors, exception handling, distributed scheduling and virtual threads.
+group: Production & Microservices
+order: 3
+level: intermediate
+tags: [async, scheduling, virtual-threads]
+---
+
+## @Async
+
+`@Async` runs a method on a task executor instead of the caller's thread. It's AOP-based: the proxy submits the call and returns immediately.
+
+```java
+@Configuration
+@EnableAsync
+class AsyncConfig {}
+
+@Service
+class ReportService {
+
+    @Async
+    public CompletableFuture<Report> generate(ReportRequest req) {   // caller gets a future
+        Report report = heavyLifting(req);
+        return CompletableFuture.completedFuture(report);
+    }
+
+    @Async
+    public void sendWelcomeEmail(String email) { ... }                // fire-and-forget
+}
+```
+
+Return `void` for fire-and-forget or `CompletableFuture<T>` so callers can compose or wait.
+
+### Which executor?
+
+Spring Boot auto-configures an `applicationTaskExecutor`:
+
+- With **`spring.threads.virtual.enabled=true`**, a `SimpleAsyncTaskExecutor` that starts a **virtual thread** per task.
+- Otherwise, a `ThreadPoolTaskExecutor` tuned via `spring.task.execution.pool.*` (core size 8, unbounded queue by default — set a capacity!).
+
+```yaml
+spring:
+  task:
+    execution:
+      pool:
+        core-size: 8
+        max-size: 32
+        queue-capacity: 500
+      thread-name-prefix: async-
+```
+
+Use a dedicated executor for isolated workloads:
+
+```java
+@Bean
+ThreadPoolTaskExecutor reportExecutor() {
+    var ex = new ThreadPoolTaskExecutor();
+    ex.setCorePoolSize(2); ex.setMaxPoolSize(4); ex.setQueueCapacity(50);
+    ex.setThreadNamePrefix("report-");
+    ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    return ex;
+}
+
+@Async("reportExecutor")
+public CompletableFuture<Report> generate(ReportRequest req) { ... }
+```
+
+### Exceptions in @Async methods
+
+- For `CompletableFuture` returns, the exception completes the future exceptionally — the caller handles it.
+- For `void` methods, exceptions would vanish; register an `AsyncUncaughtExceptionHandler`:
+
+```java
+@Configuration
+@EnableAsync
+class AsyncConfig implements AsyncConfigurer {
+    @Override
+    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+        return (ex, method, params) -> log.error("Async {} failed", method.getName(), ex);
+    }
+}
+```
+
+<Callout type="warn" title="Async gotchas">
+- **Self-invocation** bypasses `@Async` (proxy) — the method runs synchronously.
+- **Transactions don't propagate**: the async method runs on another thread, outside the caller's transaction. Pass ids, not entities, and open a new transaction inside if needed.
+- **Context** — `SecurityContext`, MDC and request scope are thread-bound. Boot's executors propagate observation context; use a `TaskDecorator` for anything else.
+- Fire-and-forget work is **lost on crash or redeploy**. For work that must happen (emails, payments), persist it — the outbox pattern or a message broker.
+</Callout>
+
+## @Scheduled
+
+```java
+@Configuration
+@EnableScheduling
+class SchedulingConfig {}
+
+@Component
+class Housekeeping {
+
+    @Scheduled(fixedRate = 30, timeUnit = TimeUnit.SECONDS)       // every 30 s, from start to start
+    void refreshExchangeRates() { ... }
+
+    @Scheduled(fixedDelay = 5_000, initialDelay = 10_000)         // 5 s after the previous run ends
+    void pollOutbox() { ... }
+
+    @Scheduled(cron = "0 0 2 * * MON-FRI", zone = "Europe/London") // 02:00 on weekdays
+    void nightlyReconciliation() { ... }
+
+    @Scheduled(cron = "${jobs.cleanup.cron:0 */15 * * * *}")      // configurable
+    void cleanupExpiredCarts() { ... }
+}
+```
+
+Spring cron has **six** fields: second, minute, hour, day of month, month, day of week. Macros like `@hourly` and `@daily` work too.
+
+By default all scheduled tasks share a **single thread**, so one slow job delays the others. Increase `spring.task.scheduling.pool.size`, or enable virtual threads.
+
+### Running in a cluster
+
+With three replicas, each `@Scheduled` method runs **three times**. Options:
+
+- **ShedLock** — a lock row in the database/Redis; only one instance runs each job:
+
+```java
+@Scheduled(cron = "0 0 2 * * *")
+@SchedulerLock(name = "nightlyReconciliation", lockAtMostFor = "PT30M", lockAtLeastFor = "PT1M")
+void nightlyReconciliation() { ... }
+```
+
+- A Kubernetes **CronJob** that runs a one-off container
+- A dedicated scheduler service or workflow engine (Quartz with JDBC store, Temporal) for complex job graphs
+
+## Virtual threads in Spring Boot 4
+
+```properties
+spring.threads.virtual.enabled=true
+```
+
+Turning this on (Java 21+) makes Tomcat request handling, `@Async`, `@Scheduled`, Kafka/RabbitMQ listeners and `SimpleAsyncTaskExecutor` use **virtual threads**. For typical I/O-bound services this raises throughput without code changes. Keep in mind:
+
+- Downstream limits become the bottleneck — size the **HikariCP pool** and use `@ConcurrencyLimit` or semaphores to protect fragile services.
+- Watch for **pinning** on Java 21 (`synchronized` around blocking I/O); Java 24+ removes most of it.
+- CPU-bound work gains nothing.
+
+```java
+@ConcurrencyLimit(10)                      // Spring Framework 7: at most 10 concurrent calls
+public Report renderPdf(long id) { ... }
+```
+
+`@ConcurrencyLimit` requires `@EnableResilientMethods`, like `@Retryable`.
+
+<Callout type="interview">
+*“How does `@Async` work and what are its pitfalls?”* — proxy + executor; self-invocation, no transaction propagation, lost exceptions for `void`, thread-bound context. *“`fixedRate` vs `fixedDelay`?”* — start-to-start vs end-to-start. *“How do you prevent a scheduled job running on every instance?”* — ShedLock, CronJob or a leader election. *“What changes when you enable virtual threads?”*
+</Callout>

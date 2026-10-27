@@ -1,0 +1,158 @@
+---
+title: Locks, Atomics & Concurrent Collections
+description: ReentrantLock, ReadWriteLock, CAS and atomic classes, LongAdder, ConcurrentHashMap, BlockingQueue and synchronisers.
+group: Concurrency
+order: 3
+level: advanced
+tags: [concurrency, locks, atomics]
+---
+
+The `java.util.concurrent` package (by Doug Lea, Java 5) offers higher-level, more flexible tools than `synchronized` and `wait/notify`.
+
+## Explicit locks
+
+`ReentrantLock` does what `synchronized` does, plus:
+
+- **`tryLock()`** / **`tryLock(timeout)`** — avoid deadlocks by giving up
+- **`lockInterruptibly()`** — respond to interruption while waiting
+- **Fairness** option — longest-waiting thread gets the lock next
+- Multiple **`Condition`** objects per lock (vs one wait-set per monitor)
+
+```java
+private final ReentrantLock lock = new ReentrantLock();
+
+public void transfer(Account from, Account to, long amount) throws InterruptedException {
+    if (lock.tryLock(500, TimeUnit.MILLISECONDS)) {
+        try {
+            from.withdraw(amount);
+            to.deposit(amount);
+        } finally {
+            lock.unlock();         // ALWAYS in finally
+        }
+    } else {
+        throw new IllegalStateException("Could not acquire lock — try again");
+    }
+}
+```
+
+### Read-write and stamped locks
+
+- `ReentrantReadWriteLock` — many concurrent **readers** or one **writer**. Good for read-heavy caches.
+- `StampedLock` (Java 8) — adds **optimistic reads**: read without locking, then `validate(stamp)`; retry under a real lock only if a write happened. Not reentrant.
+
+## Atomic variables and CAS
+
+`AtomicInteger`, `AtomicLong`, `AtomicBoolean` and `AtomicReference` are built on **compare-and-swap (CAS)**: a CPU instruction that sets a value *only if* it still equals the expected one. Updates retry in a loop instead of blocking — **lock-free**.
+
+```java
+AtomicInteger hits = new AtomicInteger();
+hits.incrementAndGet();
+hits.updateAndGet(x -> Math.min(x * 2, 1_000));          // arbitrary atomic update
+hits.compareAndSet(10, 0);                                // only if currently 10
+
+AtomicReference<Config> config = new AtomicReference<>(initial);
+config.updateAndGet(c -> c.withTimeout(Duration.ofSeconds(5)));
+```
+
+Under **heavy contention**, CAS loops spin. `LongAdder` spreads updates across cells and sums them on read — much faster for hot counters (metrics), at the cost of `sum()` not being an atomic snapshot.
+
+## Concurrent collections
+
+| Collection | Use for | Notes |
+| --- | --- | --- |
+| `ConcurrentHashMap` | Shared maps, caches | Lock striping per bucket; atomic `compute`, `merge`, `computeIfAbsent` |
+| `CopyOnWriteArrayList` | Read-mostly lists (listeners) | Every write copies the array; iteration never throws CME |
+| `ConcurrentLinkedQueue` | Non-blocking FIFO | Lock-free |
+| `ArrayBlockingQueue` / `LinkedBlockingQueue` | Producer–consumer | `put` blocks when full, `take` blocks when empty |
+| `PriorityBlockingQueue`, `DelayQueue` | Prioritised / delayed work | |
+| `ConcurrentSkipListMap` | Sorted concurrent map | Concurrent `TreeMap` alternative |
+
+<Callout type="danger" title="Check-then-act is still a race">
+Thread-safe collections make **individual** operations safe, not sequences of them:
+
+```java
+if (!map.containsKey(key)) map.put(key, compute(key));   // ✗ two threads can both compute and put
+map.computeIfAbsent(key, this::compute);                  // ✓ atomic
+```
+</Callout>
+
+## Producer–consumer with synchronisers
+
+<Playground title="ConcurrencyToolkit.java">
+
+```java
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+
+class Main {
+    record Job(int id) {}
+    static final Job POISON = new Job(-1);
+
+    public static void main(String[] args) throws Exception {
+        BlockingQueue<Job> queue = new ArrayBlockingQueue<>(5);    // bounded: producers block when full
+        ConcurrentHashMap<String, LongAdder> processedBy = new ConcurrentHashMap<>();
+        int consumers = 3;
+        CountDownLatch done = new CountDownLatch(consumers);
+
+        try (var pool = Executors.newFixedThreadPool(consumers + 1)) {
+            for (int c = 0; c < consumers; c++) {
+                String name = "consumer-" + c;
+                pool.submit(() -> {
+                    try {
+                        while (true) {
+                            Job job = queue.take();                     // blocks while empty
+                            if (job == POISON) break;
+                            Thread.sleep(5);
+                            processedBy.computeIfAbsent(name, k -> new LongAdder()).increment();
+                        }
+                    } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    finally { done.countDown(); }
+                    return null;
+                });
+            }
+            pool.submit(() -> {                                         // producer
+                for (int i = 0; i < 60; i++) queue.put(new Job(i));
+                for (int c = 0; c < consumers; c++) queue.put(POISON);   // one stop signal per consumer
+                return null;
+            });
+
+            done.await();                                               // wait for all consumers
+        }
+        long total = processedBy.values().stream().mapToLong(LongAdder::sum).sum();
+        System.out.println("processed " + total + " jobs: " + new TreeMap<>(processedBy));
+
+        // CyclicBarrier: threads wait for each other at a common point, repeatedly
+        CyclicBarrier barrier = new CyclicBarrier(3, () -> System.out.println("-- all 3 reached the barrier --"));
+        try (var pool = Executors.newFixedThreadPool(3)) {
+            for (int t = 0; t < 3; t++) {
+                int id = t;
+                pool.submit(() -> {
+                    for (int phase = 1; phase <= 2; phase++) {
+                        Thread.sleep(20L * (id + 1));
+                        System.out.println("worker " + id + " finished phase " + phase);
+                        barrier.await();
+                    }
+                    return null;
+                });
+            }
+        }
+    }
+}
+```
+
+</Playground>
+
+## Synchronisers at a glance
+
+| Class | Purpose | Reusable? |
+| --- | --- | --- |
+| `CountDownLatch` | Wait until N events happen (e.g. services started) | No |
+| `CyclicBarrier` | N threads wait for each other at a point, phase after phase | Yes |
+| `Semaphore` | Limit concurrent access to N permits (connection limits, rate limiting) | Yes |
+| `Phaser` | Flexible barrier with dynamic party registration | Yes |
+| `Exchanger` | Two threads swap objects | Yes |
+
+<Callout type="interview">
+Frequent comparisons: *“`synchronized` vs `ReentrantLock`?”* (tryLock, timeouts, interruptibility, fairness, multiple conditions — but must unlock in `finally`), *“`CountDownLatch` vs `CyclicBarrier`?”* (one-shot countdown by any threads vs reusable rendezvous of a fixed party), *“How does `AtomicInteger` work without locks?”* (CAS retry loop), and *“`HashMap` vs `ConcurrentHashMap` vs `Collections.synchronizedMap`?”* (unsafe vs fine-grained vs one global lock).
+</Callout>

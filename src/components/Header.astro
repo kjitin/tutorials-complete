@@ -1,0 +1,269 @@
+---
+import Icon from './Icon.astro';
+import { SITE } from '../site.config';
+
+const path = Astro.url.pathname;
+const links = [
+  { href: '/java/', label: 'Java' },
+  { href: '/spring-boot/', label: 'Spring Boot' },
+  { href: '/design-patterns/', label: 'Design Patterns' },
+  { href: '/interview/', label: 'Interview Q&A' },
+  { href: '/quiz/', label: 'Quizzes' },
+];
+const active = (href: string) => path.startsWith(href);
+---
+
+<header class="site-header">
+  <div class="bar">
+    <button class="icon-btn mobile-only" data-drawer-toggle aria-label="Open menu">
+      <Icon name="menu" size={20} />
+    </button>
+    <a href="/" class="logo" aria-label={`${SITE.name} home`}>
+      <span class="logo-mark">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#f97316" /><stop offset=".55" stop-color="#ec4899" /><stop
+                offset="1"
+                stop-color="#8b5cf6"
+              />
+            </linearGradient>
+          </defs>
+          <rect width="32" height="32" rx="9" fill="url(#lg)"></rect>
+          <path
+            d="M11 10 6 16l5 6M21 10l5 6-5 6M18 8l-4 16"
+            fill="none"
+            stroke="#fff"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"></path>
+        </svg>
+      </span>
+      <span class="logo-text">{SITE.name}</span>
+    </a>
+
+    <nav class="main-nav desktop-only" aria-label="Main">
+      {
+        links.map((l) => (
+          <a href={l.href} class:list={{ active: active(l.href) }} aria-current={active(l.href) ? 'page' : undefined}>
+            {l.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <div class="actions">
+      <button class="search-btn" data-search-open aria-label="Search">
+        <Icon name="search" size={16} />
+        <span class="desktop-only">Search</span>
+        <kbd class="desktop-only" data-search-kbd>⌘K</kbd>
+      </button>
+      <a href="/progress/" class="icon-btn" aria-label="My progress" title="My progress">
+        <Icon name="chart" size={18} />
+      </a>
+      <button class="icon-btn" data-theme-toggle aria-label="Toggle colour theme" title="Toggle theme">
+        <span class="theme-dark"><Icon name="moon" size={18} /></span>
+        <span class="theme-light"><Icon name="sun" size={18} /></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="drawer" data-drawer>
+  <div class="drawer-backdrop" data-drawer-toggle></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <span class="logo-text">{SITE.name}</span>
+      <button class="icon-btn" data-drawer-toggle aria-label="Close menu"><Icon name="x" size={20} /></button>
+    </div>
+    <nav class="drawer-nav" aria-label="Mobile">
+      {
+        links.map((l) => (
+          <a href={l.href} class:list={{ active: active(l.href) }}>
+            {l.label}
+          </a>
+        ))
+      }
+      <a href="/progress/" class:list={{ active: active('/progress/') }}>My progress</a>
+    </nav>
+    <slot name="drawer" />
+  </div>
+</div>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--header-h);
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+  }
+  .bar {
+    height: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .logo-mark {
+    display: grid;
+    filter: drop-shadow(0 4px 14px rgba(236, 72, 153, 0.35));
+  }
+  .logo-text {
+    font-weight: 750;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+  }
+  .main-nav {
+    display: flex;
+    gap: 4px;
+  }
+  .main-nav a {
+    padding: 7px 12px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 14.5px;
+    font-weight: 500;
+    transition: color 0.15s, background 0.15s;
+  }
+  .main-nav a:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .main-nav a.active {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .search-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 10px 0 12px;
+    min-width: 36px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font: 500 14px var(--font-sans);
+    cursor: pointer;
+  }
+  .search-btn span {
+    margin-right: 24px;
+  }
+  .search-btn:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .icon-btn:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  :global([data-theme='dark']) .theme-light,
+  :global([data-theme='light']) .theme-dark {
+    display: none;
+  }
+  .theme-dark,
+  .theme-light {
+    display: grid;
+  }
+
+  .drawer {
+    display: none;
+  }
+  .drawer[data-open] {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+  }
+  .drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .drawer-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 86vw);
+    overflow-y: auto;
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+  }
+  .drawer-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .drawer-nav {
+    display: grid;
+    gap: 2px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .drawer-nav a {
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-weight: 500;
+    color: var(--text-soft);
+  }
+  .drawer-nav a.active,
+  .drawer-nav a:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  .mobile-only {
+    display: none;
+  }
+  @media (max-width: 960px) {
+    .desktop-only {
+      display: none;
+    }
+    .mobile-only {
+      display: grid;
+    }
+    .bar {
+      gap: 8px;
+      padding: 0 12px;
+    }
+    .search-btn {
+      padding: 0;
+      justify-content: center;
+      width: 36px;
+    }
+  }
+</style>

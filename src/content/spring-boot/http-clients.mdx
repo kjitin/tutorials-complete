@@ -1,0 +1,164 @@
+---
+title: RestClient & HTTP Service Clients
+description: Calling other services with RestClient, declarative @HttpExchange interfaces registered with @ImportHttpServices, timeouts, error handling and retries.
+group: Web & REST
+order: 4
+level: intermediate
+tags: [rest-client, http, boot4]
+---
+
+## Which client?
+
+| Client | Style | Use in Spring Boot 4 |
+| --- | --- | --- |
+| **`RestClient`** | Fluent, synchronous | ✓ Default choice for servlet apps (pairs perfectly with virtual threads) |
+| **HTTP service clients** (`@HttpExchange` interfaces) | Declarative | ✓ Best for calling well-defined APIs |
+| `WebClient` | Fluent, reactive | WebFlux apps, or streaming |
+| `RestTemplate` | Template, synchronous | Legacy — in maintenance mode; prefer `RestClient` |
+| OpenFeign | Declarative (Spring Cloud) | Superseded by HTTP service clients for most uses |
+
+## RestClient
+
+Inject the auto-configured `RestClient.Builder` (it applies Boot's message converters, observability and customizers) and build one client per downstream service:
+
+```java
+@Configuration(proxyBeanMethods = false)
+class InventoryClientConfig {
+    @Bean
+    RestClient inventoryRestClient(RestClient.Builder builder, InventoryProperties props) {
+        return builder
+            .baseUrl(props.baseUrl())
+            .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+            .requestInterceptor(new BearerTokenInterceptor())           // auth, correlation ids, …
+            .build();
+    }
+}
+
+@Component
+class InventoryClient {
+    private final RestClient http;
+    InventoryClient(RestClient inventoryRestClient) { this.http = inventoryRestClient; }
+
+    StockLevel stock(String sku) {
+        return http.get()
+            .uri("/stock/{sku}", sku)
+            .retrieve()
+            .onStatus(status -> status.value() == 404, (req, res) -> { throw new UnknownSkuException(sku); })
+            .body(StockLevel.class);
+    }
+
+    List<StockLevel> stock(List<String> skus) {
+        return http.get()
+            .uri(b -> b.path("/stock").queryParam("sku", skus).build())
+            .retrieve()
+            .body(new ParameterizedTypeReference<>() {});              // generic types
+    }
+
+    Reservation reserve(ReserveRequest request) {
+        ResponseEntity<Reservation> response = http.post()
+            .uri("/reservations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(request)
+            .retrieve()
+            .toEntity(Reservation.class);                               // status + headers + body
+        return response.getBody();
+    }
+}
+```
+
+By default, `retrieve()` throws `HttpClientErrorException` (4xx) or `HttpServerErrorException` (5xx). Use `onStatus` to translate them into meaningful domain exceptions, or `exchange(...)` for full control.
+
+## HTTP service clients — declarative interfaces
+
+Describe the remote API as a Java interface. Spring generates the implementation (a proxy) backed by `RestClient`:
+
+```java
+@HttpExchange("/stock")
+public interface InventoryApi {
+
+    @GetExchange("/{sku}")
+    StockLevel stock(@PathVariable String sku);
+
+    @GetExchange
+    List<StockLevel> stock(@RequestParam("sku") List<String> skus);
+
+    @PostExchange("/reservations")
+    Reservation reserve(@RequestBody ReserveRequest request);
+
+    @DeleteExchange("/reservations/{id}")
+    void release(@PathVariable String id);
+}
+```
+
+Spring Framework 7 removes the old boilerplate of wiring a `HttpServiceProxyFactory` by hand. Register whole **groups** of interfaces and configure them through properties:
+
+```java
+@Configuration(proxyBeanMethods = false)
+@ImportHttpServices(group = "inventory", types = InventoryApi.class)
+@ImportHttpServices(group = "payments", basePackages = "com.shop.payments.api")
+class HttpClientsConfig {}
+```
+
+```yaml
+spring:
+  http:
+    serviceclient:
+      inventory:
+        base-url: https://inventory.internal
+        read-timeout: 2s
+      payments:
+        base-url: https://payments.internal
+        connect-timeout: 1s
+        read-timeout: 5s
+```
+
+Then just inject the interface:
+
+```java
+@Service
+class CheckoutService {
+    private final InventoryApi inventory;
+    CheckoutService(InventoryApi inventory) { this.inventory = inventory; }
+}
+```
+
+Interfaces are trivial to mock in tests and read like documentation of the remote API. API versioning works here too: `@GetExchange(url = "/{sku}", version = "2.0")`.
+
+## Timeouts: always set them
+
+The default JDK/Apache clients can wait **forever** for a slow downstream service — one hanging dependency then exhausts your threads. Configure both:
+
+- **Connect timeout** — how long to establish a TCP connection (≈1–2 s)
+- **Read timeout** — how long to wait for response data (based on the downstream's SLA)
+
+```properties
+# global defaults for RestClient / RestTemplate built from Boot's builders
+spring.http.clients.connect-timeout=2s
+spring.http.clients.read-timeout=5s
+```
+
+## Retries and resilience
+
+Spring Framework 7 ships retry support in core — no extra library needed for simple cases:
+
+```java
+@Configuration
+@EnableResilientMethods
+class ResilienceConfig {}
+
+@Component
+class PricingClient {
+    @Retryable(includes = HttpServerErrorException.class, maxAttempts = 3, delay = 200, multiplier = 2)
+    public Price price(String sku) { return http.get().uri("/prices/{sku}", sku).retrieve().body(Price.class); }
+}
+```
+
+Only retry **idempotent** operations (GET, PUT, DELETE — or POSTs protected by an idempotency key). For circuit breakers and bulkheads, see [Microservice Resilience](/spring-boot/resilience/).
+
+<Callout type="tip" title="Testing clients">
+Use `MockRestServiceServer` (works with `RestClient` built from a builder via `@RestClientTest`) to stub responses at the HTTP level, or WireMock for full contract-style tests. For HTTP service clients, mock the interface directly in unit tests.
+</Callout>
+
+<Callout type="interview">
+*“`RestTemplate` vs `RestClient` vs `WebClient`?”* — `RestTemplate` is legacy (maintenance mode); `RestClient` is its modern fluent synchronous replacement; `WebClient` is reactive. *“What are HTTP interface clients?”* — `@HttpExchange`-annotated Java interfaces whose implementation Spring generates; in Spring Framework 7 they're registered with `@ImportHttpServices` and configured per group. Always mention timeouts and which operations are safe to retry.
+</Callout>

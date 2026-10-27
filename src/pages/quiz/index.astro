@@ -1,0 +1,126 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { QUIZZES } from '../../data/quizzes';
+import { TRACKS } from '../../site.config';
+
+const total = QUIZZES.reduce((s, q) => s + q.questions.length, 0);
+---
+
+<BaseLayout title="Quizzes" description={`${total} multiple-choice questions on Java, Spring Boot and design patterns with instant explanations.`}>
+  <section class="hero bg-grid">
+    <div class="container">
+      <span class="eyebrow">Practice</span>
+      <h1>Test what you know.<br /><span class="gradient-text">{total} questions, instant feedback.</span></h1>
+      <p>Each quiz shuffles its questions and explains every answer. Your best score is saved in this browser.</p>
+    </div>
+  </section>
+  <div class="container grid">
+    {
+      QUIZZES.map((quiz) => {
+        const track = TRACKS.find((t) => t.id === quiz.track)!;
+        return (
+          <a class="quiz-card card" href={`/quiz/${quiz.id}/`} style={`--accent:${track.accent}`}>
+            <span class="qc-top">
+              <span class="qc-icon">
+                <Icon name={track.icon} size={18} />
+              </span>
+              <span class="chip">{quiz.questions.length} questions</span>
+            </span>
+            <span class="qc-title">{quiz.title}</span>
+            <span class="qc-desc">{quiz.description}</span>
+            <span class="qc-foot">
+              <span class="qc-best" data-best={quiz.id}>Not attempted yet</span>
+              <Icon name="arrow-right" size={16} />
+            </span>
+          </a>
+        );
+      })
+    }
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../../scripts/progress';
+  const scores = progress.quizScores();
+  document.querySelectorAll<HTMLElement>('[data-best]').forEach((el) => {
+    const s = scores[el.dataset.best!];
+    if (s) {
+      el.textContent = `Best ${s.best}/${s.total} (${Math.round((s.best / s.total) * 100)}%)`;
+      el.classList.add('has');
+    }
+  });
+</script>
+
+<style>
+  .hero {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 {
+    font-size: clamp(32px, 5.4vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    margin: 0 0 18px;
+  }
+  .hero p {
+    max-width: 600px;
+    font-size: 17.5px;
+    color: var(--text-soft);
+    margin: 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    padding-top: 40px;
+  }
+  .quiz-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 22px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .quiz-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    transform: translateY(-2px);
+  }
+  .qc-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .qc-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .qc-title {
+    font-weight: 650;
+    font-size: 18px;
+  }
+  .qc-desc {
+    color: var(--muted);
+    font-size: 14px;
+    flex: 1;
+  }
+  .qc-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--accent);
+  }
+  .qc-best {
+    color: var(--muted);
+  }
+  .qc-best:global(.has) {
+    color: var(--ok);
+    font-weight: 600;
+  }
+</style>

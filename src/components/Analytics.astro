@@ -1,0 +1,25 @@
+---
+import { SITE } from '../site.config';
+const { provider, ga4Id, plausibleDomain } = SITE.analytics;
+---
+
+{
+  provider === 'ga4' && ga4Id && (
+    <>
+      <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
+      <script is:inline define:vars={{ ga4Id }}>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() {
+          dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+        gtag('config', ga4Id, { anonymize_ip: true });
+      </script>
+    </>
+  )
+}
+{
+  provider === 'plausible' && plausibleDomain && (
+    <script is:inline defer data-domain={plausibleDomain} src="https://plausible.io/js/script.js" />
+  )
+}

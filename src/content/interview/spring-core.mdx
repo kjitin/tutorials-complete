@@ -1,0 +1,108 @@
+---
+title: Spring Core
+description: IoC and DI, bean scopes and lifecycle, configuration, AOP and proxies — the Spring Framework 7 fundamentals behind every Boot application.
+track: spring-boot
+order: 10
+---
+
+<QA q="What are IoC and Dependency Injection?" level="easy">
+
+**Inversion of Control** means objects don't create or look up their dependencies — a container supplies them and manages their lifecycle. **Dependency Injection** is the technique: dependencies are passed in through constructors (preferred), setters or fields. Result: loose coupling, easy testing with fakes, configuration in one place.
+
+</QA>
+
+<QA q="Why is constructor injection preferred over field injection?" level="easy">
+
+Dependencies are **explicit** and fields can be **final**; the object is never half-initialised; unit tests just call the constructor without Spring or reflection; too many parameters make a design smell visible; and circular dependencies fail fast. With a single constructor, `@Autowired` is optional.
+
+</QA>
+
+<QA q="BeanFactory vs ApplicationContext?" level="medium">
+
+`BeanFactory` is the basic container: bean definitions, lazy instantiation, DI. `ApplicationContext` extends it with eager singleton creation, automatic registration of post-processors, events, i18n (`MessageSource`), resource loading and `Environment`/profiles. Applications always use an `ApplicationContext`.
+
+</QA>
+
+<QA q="@Component vs @Bean?" level="easy">
+
+`@Component` (and `@Service`, `@Repository`, `@Controller`) annotates **your own class**, which component scanning detects. `@Bean` annotates a **factory method** in a `@Configuration` class — used for third-party classes you can't annotate or when construction needs logic.
+
+</QA>
+
+<QA q="What does @Repository add over @Component?" level="medium">
+
+Semantics plus **persistence exception translation**: `@Repository` beans are wrapped so that vendor-specific exceptions (JDBC `SQLException`, Hibernate exceptions) are translated into Spring's unchecked `DataAccessException` hierarchy.
+
+</QA>
+
+<QA q="Two beans implement the same interface. How does Spring decide which to inject?" level="medium">
+
+Injection is by **type**; with multiple candidates it fails with `NoUniqueBeanDefinitionException` unless resolved by `@Primary`, `@Qualifier("name")` at the injection point, a parameter name matching the bean name, or by injecting **all** of them as a `List<T>` or `Map<String, T>`. `ObjectProvider<T>` gives lazy or optional access.
+
+</QA>
+
+<QA q="What bean scopes exist, and what is the default?" level="easy">
+
+`singleton` (default — **one per ApplicationContext**, not per JVM), `prototype` (new instance per lookup; Spring doesn't call its destroy callbacks), and web scopes `request`, `session` and `application`.
+
+</QA>
+
+<QA q="Are singleton beans thread-safe?" level="medium">
+
+Not automatically. One instance serves every thread, so it's only safe if it has **no mutable shared state** — typical stateless services are fine. Mutable fields need thread-safe types or should move to method locals, request scope or the database.
+
+</QA>
+
+<QA q="How do you inject a prototype bean into a singleton so you get a new instance each time?" level="hard">
+
+Constructor injection resolves the prototype **once**. Instead inject `ObjectProvider<T>` and call `getObject()` per use, use a `@Lookup` method, or use a **scoped proxy** so each call reaches a fresh target. Request and session scopes use scoped proxies automatically via `@RequestScope` / `@SessionScope`.
+
+</QA>
+
+<QA q="Describe the bean lifecycle." level="medium">
+
+Instantiate (constructor injection) → populate (field/setter injection) → `*Aware` callbacks → `BeanPostProcessor` before-init → `@PostConstruct` → `afterPropertiesSet()` → custom init method → `BeanPostProcessor` after-init (where **AOP proxies** are created) → ready → on shutdown `@PreDestroy` → `destroy()` → custom destroy method.
+
+</QA>
+
+<QA q="BeanPostProcessor vs BeanFactoryPostProcessor?" level="hard">
+
+A **BeanFactoryPostProcessor** modifies **bean definitions** before any bean is instantiated (e.g. resolving placeholders). A **BeanPostProcessor** works on bean **instances** around initialisation and can wrap them — how `@Autowired` processing and the `@Transactional`, `@Async` and `@Cacheable` proxies are implemented.
+
+</QA>
+
+<QA q="How does Spring handle circular dependencies?" level="hard">
+
+With constructor injection, a cycle is unresolvable and startup fails with `BeanCurrentlyInCreationException`. Spring Boot prohibits circular references by default (since 2.6). Fix the design: extract shared logic into a third bean, use events, or — as a last resort — make one dependency `@Lazy`.
+
+</QA>
+
+<QA q="What is AOP and how does Spring implement it?" level="medium">
+
+AOP modularises cross-cutting concerns (transactions, security, metrics). Spring AOP wraps matching beans in a **proxy** — a CGLIB subclass by default in Boot, or a JDK dynamic proxy for interfaces — that runs advice around **method calls on the bean**. AspectJ, by contrast, weaves bytecode and can advise constructors, fields and private methods.
+
+</QA>
+
+<QA q="Why does @Transactional (or @Async, @Cacheable) not work when calling a method from the same class?" level="medium">
+
+The behaviour lives in the **proxy**. An internal call `this.save()` goes to the raw target and bypasses the advice. Fix: move the method to another bean (best), annotate the outer method, use programmatic APIs (`TransactionTemplate`), or inject the bean's own proxy as a last resort. Proxies also can't intercept `private`, `final` or `static` methods.
+
+</QA>
+
+<QA q="JDK dynamic proxy vs CGLIB proxy?" level="medium">
+
+A **JDK dynamic proxy** implements the bean's **interfaces** — only interface methods are intercepted and you must inject by interface. **CGLIB** generates a **subclass** at runtime, works with concrete classes, but can't proxy `final` classes or methods. Spring Boot defaults to CGLIB.
+
+</QA>
+
+<QA q="What is the purpose of Spring application events?" level="medium">
+
+They decouple components: a publisher calls `publishEvent(new OrderPlaced(...))` and `@EventListener` methods react without referencing each other. Listeners run **synchronously in the publisher's thread and transaction** by default; add `@Async` for asynchrony and use `@TransactionalEventListener(phase = AFTER_COMMIT)` for side effects that must only happen after a commit.
+
+</QA>
+
+<QA q="What changed for null safety in Spring Framework 7?" level="hard">
+
+Spring Framework 7 moved to **JSpecify** annotations (`@NullMarked` packages, `@Nullable` types). Tools like NullAway and IntelliJ IDEA can check null contracts at build time across your code and Spring's APIs, and Kotlin sees accurate nullability. Teams adopt it by adding `@NullMarked` in `package-info.java`.
+
+</QA>

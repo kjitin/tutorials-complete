@@ -1,0 +1,143 @@
+---
+title: Generics
+description: Type parameters, bounded types, wildcards and PECS, type erasure and its consequences.
+group: Fundamentals
+order: 4
+level: intermediate
+tags: [generics, type-system]
+---
+
+## Why generics?
+
+Before Java 5, collections held `Object`, so every read needed a cast — and a wrong cast failed at runtime:
+
+```java
+List list = new ArrayList();
+list.add("hello");
+Integer n = (Integer) list.get(0);   // ClassCastException at runtime
+```
+
+Generics move that check to **compile time**:
+
+```java
+List<String> list = new ArrayList<>();
+list.add("hello");
+Integer n = list.get(0);             // compile error
+```
+
+## Generic classes and methods
+
+```java
+public class Box<T> {                         // generic class
+    private final T value;
+    public Box(T value) { this.value = value; }
+    public T get() { return value; }
+    public <R> Box<R> map(Function<? super T, ? extends R> fn) {   // generic method
+        return new Box<>(fn.apply(value));
+    }
+}
+
+public static <T> T firstOrDefault(List<T> list, T fallback) {    // static generic method
+    return list.isEmpty() ? fallback : list.get(0);
+}
+```
+
+Common naming: `T` type, `E` element, `K`/`V` key/value, `R` result, `N` number.
+
+## Bounded type parameters
+
+`<T extends Bound>` restricts the type argument and lets you call the bound's methods:
+
+```java
+public static <T extends Comparable<? super T>> T max(Collection<? extends T> items) {
+    T best = null;
+    for (T item : items) if (best == null || item.compareTo(best) > 0) best = item;
+    return best;
+}
+```
+
+Multiple bounds use `&`: `<T extends Number & Comparable<T>>` (a class bound must come first).
+
+## Wildcards and PECS
+
+Generics are **invariant**: a `List<Integer>` is *not* a `List<Number>`, even though `Integer` is a `Number`. If it were, you could add a `Double` to a list of integers. Wildcards restore flexibility:
+
+| Wildcard | Meaning | You can | You can't |
+| --- | --- | --- | --- |
+| `List<? extends Number>` | some unknown subtype of `Number` | **read** as `Number` | add (except `null`) |
+| `List<? super Integer>` | some unknown supertype of `Integer` | **add** `Integer`s | read as anything but `Object` |
+| `List<?>` | some unknown type | read as `Object` | add |
+
+**PECS — Producer `extends`, Consumer `super`:** if a parameter *produces* values you read, use `extends`; if it *consumes* values you write, use `super`.
+
+<Playground title="Pecs.java">
+
+```java
+import java.util.*;
+
+class Main {
+    // src PRODUCES numbers -> extends;  dst CONSUMES them -> super
+    static <T> void copy(List<? extends T> src, List<? super T> dst) {
+        for (T item : src) dst.add(item);
+    }
+
+    static double sum(Collection<? extends Number> numbers) {    // read-only producer
+        double total = 0;
+        for (Number n : numbers) total += n.doubleValue();
+        return total;
+    }
+
+    static void fillWithOnes(List<? super Integer> sink, int count) {   // write-only consumer
+        for (int i = 0; i < count; i++) sink.add(1);
+    }
+
+    public static void main(String[] args) {
+        List<Integer> ints = List.of(1, 2, 3);
+        List<Double> doubles = List.of(1.5, 2.5);
+        System.out.println(sum(ints) + " " + sum(doubles));     // both accepted thanks to ? extends
+
+        List<Number> numbers = new ArrayList<>();
+        List<Object> objects = new ArrayList<>();
+        copy(ints, numbers);              // T = Integer: Integer -> Number
+        copy(doubles, objects);           // T = Double:  Double  -> Object
+        fillWithOnes(numbers, 2);
+        System.out.println(numbers + " " + objects);
+
+        // List<Number> n = ints;         // ✗ compile error: generics are invariant
+        Number[] arr = new Integer[1];    // arrays are covariant...
+        try { arr[0] = 2.5; }             // ...so this compiles but fails at runtime
+        catch (ArrayStoreException e) { System.out.println("ArrayStoreException: " + e.getMessage()); }
+    }
+}
+```
+
+</Playground>
+
+<Callout type="tip">
+`Collections.copy(List<? super T> dest, List<? extends T> src)` and `Comparator<? super T>` in `List.sort` are PECS in the JDK. Use wildcards in **parameters** of public APIs; avoid them in **return types**, where they force callers to deal with wildcards too.
+</Callout>
+
+## Type erasure
+
+Generics exist only at compile time. The compiler checks types, inserts casts, and then **erases** type parameters to their bounds (`Object` if unbounded). At runtime, `List<String>` and `List<Integer>` are the same class.
+
+Consequences:
+
+```java
+new T();                                   // ✗ can't instantiate a type parameter
+T[] arr = new T[10];                       // ✗ can't create generic arrays
+if (obj instanceof List<String>) { }       // ✗ can't test parameterised types (List<?> is fine)
+static T cache;                            // ✗ static fields can't use the class's T
+void print(List<String> l) {}
+void print(List<Integer> l) {}             // ✗ same erasure: both are print(List)
+```
+
+Workarounds pass a **type token**: `Class<T>` (`EnumSet.noneOf(Color.class)`, `entityManager.find(User.class, id)`), or a `Supplier<T>` to create instances. Libraries like Jackson and Spring use *super type tokens* (`new TypeReference<List<User>>() {}`, `ParameterizedTypeReference`) because generic types of a **subclass's superclass** survive erasure in class metadata.
+
+<Callout type="warn" title="Heap pollution and raw types">
+Never use raw types (`List` instead of `List<String>`) in new code — they turn off type checking and cause `ClassCastException`s far from the bug. Pay attention to "unchecked" compiler warnings; they mark places where erasure lets incorrect types slip in.
+</Callout>
+
+<Callout type="interview">
+Popular questions: *“What is type erasure and why did Java choose it?”* (backward compatibility with pre-Java-5 bytecode and libraries), *“Explain `? extends` vs `? super`”* (PECS), *“Why can't you create `new T[]`?”* (arrays need their component type at runtime for `ArrayStoreException` checks, but `T` has been erased).
+</Callout>

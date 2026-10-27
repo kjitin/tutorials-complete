@@ -1,0 +1,145 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { TRACKS } from '../../site.config';
+import { countQuestions } from '../../lib/inline';
+
+const topics = (await getCollection('interview')).sort((a, b) => a.data.order - b.data.order);
+const total = topics.reduce((s, t) => s + countQuestions(t.body), 0);
+---
+
+<BaseLayout title="Interview Questions" description={`${total} Java, Spring Boot and design pattern interview questions with detailed answers.`}>
+  <section class="hero bg-grid">
+    <div class="container">
+      <span class="eyebrow">Interview prep</span>
+      <h1>{total} interview questions,<br /><span class="gradient-text">answered properly.</span></h1>
+      <p>
+        Every answer explains the <em>why</em>, shows code where it helps and flags the follow-up questions interviewers
+        love. Filter by difficulty, mark what you already know and focus on the gaps.
+      </p>
+    </div>
+  </section>
+
+  <div class="container">
+    {
+      TRACKS.map((track) => {
+        const list = topics.filter((t) => t.data.track === track.id);
+        return (
+          <section class="group" id={track.id} style={`--accent:${track.accent}`}>
+            <h2>
+              <span class="g-icon">
+                <Icon name={track.icon} size={18} />
+              </span>
+              {track.title}
+            </h2>
+            <div class="grid">
+              {list.map((t) => {
+                const count = countQuestions(t.body);
+                return (
+                  <a class="topic card" href={`/interview/${t.id}/`}>
+                    <span class="t-title">{t.data.title}</span>
+                    <span class="t-desc">{t.data.description}</span>
+                    <span class="t-foot">
+                      <span>{count} questions</span>
+                      <span class="t-known" data-known-count={t.id} data-total={count} />
+                      <Icon name="arrow-right" size={16} />
+                    </span>
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })
+    }
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../../scripts/progress';
+  const known = progress.known();
+  document.querySelectorAll<HTMLElement>('[data-known-count]').forEach((el) => {
+    const n = known.filter((k) => k.startsWith(el.dataset.knownCount + ':')).length;
+    if (n) el.textContent = `· ${n}/${el.dataset.total} known`;
+  });
+</script>
+
+<style>
+  .hero {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 {
+    font-size: clamp(32px, 5.4vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    margin: 0 0 18px;
+  }
+  .hero p {
+    max-width: 640px;
+    font-size: 17.5px;
+    color: var(--text-soft);
+    margin: 0;
+  }
+  .group {
+    margin-top: 48px;
+    scroll-margin-top: calc(var(--header-h) + 20px);
+  }
+  .group h2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 22px;
+    margin: 0 0 16px;
+  }
+  .g-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+  .topic {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 20px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .topic:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    transform: translateY(-2px);
+  }
+  .t-title {
+    font-weight: 650;
+    font-size: 17px;
+  }
+  .t-desc {
+    color: var(--muted);
+    font-size: 14px;
+    flex: 1;
+  }
+  .t-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--accent);
+  }
+  .t-foot :global(svg) {
+    margin-left: auto;
+  }
+  .t-known {
+    color: var(--ok);
+  }
+</style>

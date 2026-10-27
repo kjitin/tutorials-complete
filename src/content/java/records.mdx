@@ -1,0 +1,146 @@
+---
+title: Records
+description: Concise immutable data carriers — compact constructors, validation, custom methods, local records and where records fit (and don't).
+group: Modern Java (17–21)
+order: 2
+level: beginner
+tags: [java16, records, immutability]
+---
+
+## The boilerplate problem
+
+A simple immutable `Point` class used to need a constructor, getters, `equals`, `hashCode` and `toString` — ~40 lines that IDEs generated and humans had to review. A **record** (Java 16) declares the same thing in one line:
+
+```java
+public record Point(int x, int y) {}
+```
+
+The compiler generates:
+
+- `private final` fields `x` and `y`
+- a **canonical constructor** `Point(int x, int y)`
+- accessor methods `x()` and `y()` (no `get` prefix)
+- `equals` and `hashCode` based on all components
+- `toString()` → `Point[x=1, y=2]`
+
+Records are implicitly `final` and extend `java.lang.Record`, so they can't extend other classes — but they **can implement interfaces**.
+
+## Compact constructors: validation and normalisation
+
+<Playground title="Records.java">
+
+```java
+import java.math.BigDecimal;
+import java.util.*;
+
+record Money(BigDecimal amount, String currency) {
+    // Compact constructor: no parameter list, fields assigned automatically afterwards
+    Money {
+        Objects.requireNonNull(amount, "amount");
+        if (amount.signum() < 0) throw new IllegalArgumentException("amount must be >= 0");
+        if (!currency.matches("[A-Z]{3}")) throw new IllegalArgumentException("ISO currency expected: " + currency);
+        amount = amount.setScale(2, java.math.RoundingMode.HALF_EVEN);   // normalise before assignment
+    }
+
+    // Additional constructor must delegate to the canonical one
+    Money(String amount, String currency) { this(new BigDecimal(amount), currency); }
+
+    // Static factory and instance methods are allowed
+    static Money gbp(String amount) { return new Money(amount, "GBP"); }
+
+    Money plus(Money other) {
+        if (!currency.equals(other.currency)) throw new IllegalArgumentException("currency mismatch");
+        return new Money(amount.add(other.amount), currency);
+    }
+}
+
+record Team(String name, List<String> members) {
+    Team {
+        members = List.copyOf(members);            // defensive copy: records are only shallowly immutable
+    }
+}
+
+class Main {
+    public static void main(String[] args) {
+        Money a = Money.gbp("19.999");
+        Money b = new Money("5", "GBP");
+        System.out.println(a + " + " + b + " = " + a.plus(b));
+        System.out.println("equal by value? " + new Money("5.00", "GBP").equals(b));
+
+        try { new Money("-1", "GBP"); } catch (IllegalArgumentException e) { System.out.println("rejected: " + e.getMessage()); }
+        try { new Money("1", "pounds"); } catch (IllegalArgumentException e) { System.out.println("rejected: " + e.getMessage()); }
+
+        var members = new ArrayList<>(List.of("ada", "bob"));
+        var team = new Team("core", members);
+        members.add("mallory");                       // doesn't leak into the record
+        System.out.println(team);
+
+        // Local records: great for intermediate results inside a method
+        record Score(String player, int points) {}
+        var best = List.of(new Score("ada", 42), new Score("bob", 57), new Score("cy", 33)).stream()
+            .max(Comparator.comparingInt(Score::points)).orElseThrow();
+        System.out.println("winner: " + best.player());
+
+        // Records in sets and maps just work
+        Set<Money> wallet = new HashSet<>(List.of(Money.gbp("1"), Money.gbp("1.00"), Money.gbp("2")));
+        System.out.println("distinct coins: " + wallet.size());
+    }
+}
+```
+
+</Playground>
+
+<Callout type="warn" title="Shallow immutability">
+Record fields are `final`, but if a component is a mutable object — a `List`, an array, a `Date` — the *contents* can still change. Make defensive copies in the compact constructor (`List.copyOf`) and avoid arrays as components (their `equals` compares identity, not contents).
+</Callout>
+
+## What records can and can't have
+
+| ✓ Allowed | ✗ Not allowed |
+| --- | --- |
+| Static fields and methods | Additional **instance** fields |
+| Instance methods | Extending another class |
+| Implementing interfaces | Non-final / mutable component fields |
+| Nested types, annotations, generics | Overriding accessors with different return types |
+| Custom accessors (same signature) | Instance initializer blocks |
+
+## Where records shine
+
+- **DTOs** for REST APIs — Jackson and Spring MVC handle records out of the box
+- **Value objects** — `Money`, `EmailAddress`, `OrderId`
+- **Projection types** for Spring Data queries and `@ConfigurationProperties`
+- **Map keys** and **composite keys** — correct `equals`/`hashCode` for free
+- **Algebraic data types** with sealed interfaces (next lesson)
+- **Multiple return values** via local records
+
+```java
+@ConfigurationProperties("payments")
+public record PaymentProperties(URI baseUrl, Duration timeout, int maxRetries) {}
+
+@GetMapping("/orders/{id}")
+public OrderResponse get(@PathVariable long id) { ... }    // OrderResponse is a record
+```
+
+<Callout type="danger" title="Records are not JPA entities">
+JPA entities need a no-arg constructor, mutable state and usually proxies (non-final classes) — everything records forbid. Use records for **DTOs and projections**, and regular classes for `@Entity` types. (Records *can* be `@Embeddable` in Hibernate 6.2+.)
+</Callout>
+
+## Record patterns (Java 21)
+
+Records can be **deconstructed** in `instanceof` and `switch`:
+
+```java
+if (shape instanceof Point(int x, int y) && x == y) { ... }
+
+String describe(Object o) {
+    return switch (o) {
+        case Point(var x, var y) when x == 0 && y == 0 -> "origin";
+        case Point(var x, var y) -> "point at " + x + "," + y;
+        default -> "something else";
+    };
+}
+```
+
+<Callout type="interview">
+*“Record vs class vs Lombok `@Value`?”* — a record is a language-level, transparent carrier for immutable data: its API *is* its state, and it enables deconstruction patterns. Lombok generates similar code via annotation processing but is a build-time dependency and can't do pattern matching. Use a regular class when you need encapsulated internal state, inheritance or mutability.
+</Callout>

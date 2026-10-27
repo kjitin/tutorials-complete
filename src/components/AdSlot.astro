@@ -1,0 +1,34 @@
+---
+import { SITE } from '../site.config';
+
+interface Props {
+  slot: keyof typeof SITE.ads.slots;
+}
+const { slot } = Astro.props;
+const { enabled, client, slots } = SITE.ads;
+const slotId = slots[slot];
+const show = enabled && client && slotId;
+---
+
+{
+  show && (
+    <aside class="ad-slot" aria-label="Advertisement">
+      <ins
+        class="adsbygoogle"
+        style="display:block"
+        data-ad-client={client}
+        data-ad-slot={slotId}
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      />
+      <script is:inline>(window.adsbygoogle = window.adsbygoogle || []).push({});</script>
+    </aside>
+  )
+}
+
+<style>
+  .ad-slot {
+    margin: 2rem 0;
+    min-height: 90px;
+  }
+</style>

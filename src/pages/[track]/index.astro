@@ -1,0 +1,254 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { TRACKS, trackById, type TrackId } from '../../site.config';
+import { getLessons, groupLessons, lessonKey, lessonUrl } from '../../lib/lessons';
+
+export function getStaticPaths() {
+  return TRACKS.map((t) => ({ params: { track: t.id }, props: { trackId: t.id } }));
+}
+
+const { trackId } = Astro.props as { trackId: TrackId };
+const track = trackById(trackId);
+const lessons = await getLessons(trackId);
+const groups = groupLessons(trackId, lessons);
+const urls = lessons.map((l) => ({ key: lessonKey(trackId, l.id), url: lessonUrl(trackId, l.id) }));
+let n = 0;
+---
+
+<BaseLayout title={track.title} description={track.description}>
+  <section class="track-hero bg-grid" style={`--accent:${track.accent}`}>
+    <div class="container">
+      <div class="th-icon"><Icon name={track.icon} size={26} /></div>
+      <h1>{track.title}</h1>
+      <p>{track.description}</p>
+      <div class="th-stats">
+        <span><b>{lessons.length}</b> lessons</span>
+        <span><b>{groups.length}</b> modules</span>
+        <span><b>{lessons.filter((l) => l.data.level === 'advanced').length}</b> advanced topics</span>
+      </div>
+      <div class="th-progress" data-track-progress={track.id} data-total={lessons.length}>
+        <div class="progress-bar"><span></span></div>
+        <span class="sb-count"><b>0</b>/{lessons.length} completed</span>
+      </div>
+      <div class="th-cta">
+        <a class="btn btn-primary" href={urls[0]?.url} data-continue={JSON.stringify(urls)}>
+          <Icon name="play" size={14} /> <span>Start learning</span>
+        </a>
+        <a class="btn" href={`/interview/#${track.id}`}><Icon name="briefcase" size={15} /> Interview questions</a>
+        <a class="btn" href="/quiz/"><Icon name="quiz" size={15} /> Quizzes</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="container modules" style={`--accent:${track.accent}`}>
+    {
+      groups.map((g, gi) => (
+        <section class="module">
+          <div class="module-head">
+            <span class="module-num">{String(gi + 1).padStart(2, '0')}</span>
+            <h2>{g.group}</h2>
+            <span class="module-count">{g.lessons.length} lessons</span>
+          </div>
+          <div class="lesson-grid">
+            {g.lessons.map((l) => (
+              <a class="lesson-card card" href={lessonUrl(trackId, l.id)} data-lesson-key={lessonKey(trackId, l.id)}>
+                <span class="lc-top">
+                  <span class="lc-num">{++n}</span>
+                  <span class={`chip level-${l.data.level}`}>{l.data.level}</span>
+                  <span class="lc-done">
+                    <Icon name="check" size={12} stroke={3} />
+                  </span>
+                </span>
+                <span class="lc-title">{l.data.title}</span>
+                <span class="lc-desc">{l.data.description}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      ))
+    }
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../../scripts/progress';
+
+  function paint() {
+    const done = new Set(progress.completed());
+    document.querySelectorAll<HTMLElement>('[data-lesson-key]').forEach((el) =>
+      el.classList.toggle('done', done.has(el.dataset.lessonKey!)),
+    );
+    document.querySelectorAll<HTMLElement>('[data-track-progress]').forEach((el) => {
+      const total = Number(el.dataset.total);
+      const count = [...done].filter((k) => k.startsWith(el.dataset.trackProgress + '/')).length;
+      el.querySelector('b')!.textContent = String(count);
+      el.querySelector<HTMLElement>('.progress-bar span')!.style.width = `${(count / total) * 100}%`;
+    });
+    const cta = document.querySelector<HTMLAnchorElement>('[data-continue]');
+    if (cta) {
+      const urls: { key: string; url: string }[] = JSON.parse(cta.dataset.continue!);
+      const next = urls.find((u) => !done.has(u.key));
+      const started = urls.some((u) => done.has(u.key));
+      if (next) cta.href = next.url;
+      cta.querySelector('span')!.textContent = !started ? 'Start learning' : next ? 'Continue learning' : 'Review from the start';
+    }
+  }
+  paint();
+  window.addEventListener('jf:progress', paint);
+</script>
+
+<style>
+  .track-hero {
+    padding: 64px 0 48px;
+    border-bottom: 1px solid var(--border);
+    background-color: var(--bg);
+    position: relative;
+    overflow: hidden;
+  }
+  .track-hero::before {
+    content: '';
+    position: absolute;
+    width: 640px;
+    height: 640px;
+    top: -380px;
+    right: -120px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 28%, transparent), transparent 65%);
+    pointer-events: none;
+  }
+  .container {
+    position: relative;
+  }
+  .th-icon {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: clamp(34px, 6vw, 54px);
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    margin: 0 0 14px;
+  }
+  .track-hero p {
+    max-width: 640px;
+    font-size: 18px;
+    color: var(--text-soft);
+    margin: 0 0 22px;
+  }
+  .th-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    color: var(--muted);
+    font-size: 14.5px;
+    margin-bottom: 22px;
+  }
+  .th-stats b {
+    color: var(--text);
+    font-size: 16px;
+  }
+  .th-progress {
+    max-width: 360px;
+    margin-bottom: 26px;
+  }
+  .sb-count {
+    display: block;
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .sb-count b {
+    color: var(--text);
+  }
+  .th-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .modules {
+    padding-top: 40px;
+  }
+  .module {
+    margin-top: 36px;
+  }
+  .module-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .module-num {
+    font: 600 13px var(--font-mono);
+    color: var(--accent);
+  }
+  .module-head h2 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+  }
+  .module-count {
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+  .lesson-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .lesson-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 18px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .lesson-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    transform: translateY(-2px);
+  }
+  .lc-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .lc-top .chip {
+    text-transform: capitalize;
+    font-size: 11px;
+  }
+  .lc-num {
+    font: 600 12px var(--font-mono);
+    color: var(--muted);
+  }
+  .lc-done {
+    margin-left: auto;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-strong);
+    color: transparent;
+  }
+  .lesson-card:global(.done) .lc-done {
+    background: var(--ok);
+    border-color: var(--ok);
+    color: #fff;
+  }
+  .lc-title {
+    font-weight: 650;
+    font-size: 16px;
+    color: var(--text);
+  }
+  .lc-desc {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+</style>

@@ -1,0 +1,101 @@
+---
+title: JVM, Memory & Performance
+description: Heap vs stack, garbage collection, collectors, memory leaks, class loading, the JIT and diagnosing production issues.
+track: java
+order: 6
+---
+
+<QA q="What is the difference between the stack and the heap?" level="easy">
+
+The **stack** is per thread: one frame per method call holding local primitives and **references**; it's freed automatically when the method returns, and overflowing it throws `StackOverflowError`. The **heap** is shared by all threads and holds **all objects and arrays**; it's managed by the garbage collector, and exhausting it throws `OutOfMemoryError: Java heap space`.
+
+</QA>
+
+<QA q="How does the garbage collector decide what to collect?" level="medium">
+
+By **reachability**, not reference counting. Starting from **GC roots** — thread stacks, static fields, JNI references — the collector marks every reachable object; everything else is garbage. That's why reference cycles that aren't reachable from a root are collected without problems.
+
+</QA>
+
+<QA q="Explain the generational heap (young and old generations)." level="medium">
+
+Most objects die young, so new objects are allocated in **Eden**. A **minor GC** copies survivors into a **survivor space**; objects that survive enough minor GCs are **promoted** to the **old generation**, which is collected less often (major/mixed GCs). Copying only the few survivors makes young collections fast.
+
+</QA>
+
+<QA q="G1 vs ZGC vs Parallel GC — how do you choose?" level="hard">
+
+- **G1** (default) — region-based, balances throughput and pause time (`MaxGCPauseMillis`); good general choice.
+- **ZGC** (generational since 21) — concurrent relocation, **sub-millisecond** pauses regardless of heap size; for latency-sensitive services and large heaps.
+- **Parallel** — maximum throughput, longer pauses; batch jobs.
+- **Serial** — tiny heaps and containers.
+
+Choose based on latency SLOs vs throughput, measured with GC logs and load tests.
+
+</QA>
+
+<QA q="What was PermGen and what replaced it?" level="medium">
+
+PermGen was a fixed-size heap area for class metadata in Java 7 and earlier, a frequent source of `OutOfMemoryError: PermGen space` in app servers that redeployed. Java 8 replaced it with **Metaspace** in native memory, which grows dynamically (cap it with `-XX:MaxMetaspaceSize`).
+
+</QA>
+
+<QA q="Can a Java program have a memory leak? Give examples." level="medium">
+
+Yes — objects that are **still reachable but no longer needed**: unbounded static caches/maps, listeners never removed, `ThreadLocal` values in pooled threads never cleared, unclosed resources, inner classes holding outer references, and objects with broken `equals`/`hashCode` piling up in a `HashMap`.
+
+</QA>
+
+<QA q="How would you troubleshoot an OutOfMemoryError in production?" level="hard">
+
+1. Read the message: heap space, Metaspace, direct buffer, or "unable to create native thread".
+2. Run with `-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=...` (or `jcmd <pid> GC.heap_dump`).
+3. Open the dump in **Eclipse MAT** / VisualVM; check the **dominator tree** and the **path to GC roots** of the largest retained sets.
+4. Correlate with GC logs and metrics (`jvm.memory.used`, allocation rate) and recent deploys.
+5. Fix the leak, or size the heap correctly (`-XX:MaxRAMPercentage` in containers).
+
+</QA>
+
+<QA q="Strong, soft, weak and phantom references?" level="hard">
+
+- **Strong** — normal references; never collected while reachable.
+- **Soft** — collected only when memory is low; memory-sensitive caches.
+- **Weak** — collected at the next GC once only weakly reachable; `WeakHashMap`, canonicalising maps.
+- **Phantom** — enqueued after the object is finalised, for cleanup actions (`java.lang.ref.Cleaner`); `get()` always returns null.
+
+</QA>
+
+<QA q="Explain the class loader delegation model." level="medium">
+
+Loaders form a hierarchy: **Bootstrap** (core JDK) → **Platform** → **Application** (class path) → custom loaders. A loader first **delegates to its parent** and only loads the class itself if the parent can't. This prevents user code from replacing core classes like `java.lang.String` and ensures each class is loaded once per loader. A class's identity is its name **plus** its loader.
+
+</QA>
+
+<QA q="ClassNotFoundException vs NoClassDefFoundError?" level="medium">
+
+`ClassNotFoundException` is a checked exception when loading a class **by name** at runtime fails (`Class.forName`, missing JDBC driver). `NoClassDefFoundError` is an `Error` when a class that was present **at compile time** can't be found or initialised at runtime — a missing or conflicting jar, or a static initializer that failed earlier.
+
+</QA>
+
+<QA q="What does the JIT compiler do?" level="medium">
+
+The JVM starts by interpreting bytecode while **profiling** it. Hot methods are compiled to native code by **C1** quickly and later by **C2** with aggressive, profile-guided optimisations: **inlining**, **escape analysis** (stack allocation / scalar replacement), loop unrolling, lock elision and devirtualisation. If assumptions break, it **deoptimises**. That's why Java apps "warm up" and why micro-benchmarks need JMH.
+
+</QA>
+
+<QA q="How do you reduce JVM startup time?" level="hard">
+
+- **Class Data Sharing / AppCDS** — archive parsed classes from a training run
+- **AOT cache** (Project Leyden, Java 24/25) — cache linked classes and profiles
+- **GraalVM native image** — AOT-compile to a native executable (ms startup, lower peak throughput)
+- Trim dependencies, enable lazy initialisation, avoid classpath scanning
+
+Spring Boot supports CDS training runs and native images via its AOT engine.
+
+</QA>
+
+<QA q="Which tools do you use to diagnose JVM issues?" level="medium">
+
+`jcmd` (heap dumps, thread dumps, JFR, flags), `jstack` (threads/deadlocks), `jstat -gcutil` (GC), **Java Flight Recorder** + **JDK Mission Control** (low-overhead profiling in production), **async-profiler** (CPU/allocation flame graphs), Eclipse MAT (heap analysis), GC logs (`-Xlog:gc*`), and in Spring Boot the Actuator `metrics`, `threaddump` and `heapdump` endpoints.
+
+</QA>

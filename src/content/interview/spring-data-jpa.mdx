@@ -1,0 +1,113 @@
+---
+title: Spring Data JPA & Transactions
+description: Repositories, entity mapping, fetching and N+1, transactions, propagation, isolation and locking.
+track: spring-boot
+order: 12
+---
+
+<QA q="JPA vs Hibernate vs Spring Data JPA?" level="easy">
+
+**JPA** (Jakarta Persistence) is the ORM specification. **Hibernate** implements it (Hibernate 7 in Boot 4). **Spring Data JPA** sits on top and generates repository implementations from interfaces — derived queries, paging, auditing — removing DAO boilerplate.
+
+</QA>
+
+<QA q="CrudRepository vs JpaRepository?" level="easy">
+
+`CrudRepository` offers basic CRUD; `ListCrudRepository` returns `List`s. `JpaRepository` adds JPA-specific operations — `flush`, `saveAndFlush`, batch deletes, `getReferenceById` — plus paging and sorting.
+
+</QA>
+
+<QA q="How do derived query methods work?" level="easy">
+
+Spring Data parses the method name into a query: `findByCustomerIdAndStatusOrderByCreatedAtDesc` becomes `where customerId = ? and status = ? order by createdAt desc`. Keywords include `And`, `Or`, `Between`, `LessThan`, `Like`, `In`, `IsNull`, `Top3` and `Distinct`. For complex queries use `@Query` — long method names hurt readability.
+
+</QA>
+
+<QA q="Does save() insert or update?" level="medium">
+
+`save` calls `persist` if the entity is **new** and `merge` otherwise. "New" means a null id (or null `@Version`, or `Persistable.isNew()`). With manually assigned ids, `save` sees a non-null id and merges — an extra `SELECT` — unless you implement `Persistable`.
+
+</QA>
+
+<QA q="What is the N+1 query problem and how do you fix it?" level="hard">
+
+Loading N parents with one query and then touching a lazy association on each triggers **N more** queries. Fixes: a **fetch join** (`join fetch o.lines`), an **`@EntityGraph`**, **batch fetching** (`hibernate.default_batch_fetch_size`), or a **DTO projection**. Detect it with SQL logging, Hibernate statistics or tests asserting query counts.
+
+</QA>
+
+<QA q="LAZY vs EAGER fetching — what should you use?" level="medium">
+
+Make associations **LAZY** — including `@ManyToOne` and `@OneToOne`, which are EAGER by default — and decide per use case what to fetch. EAGER loads associations every time, often with extra queries, and can't be switched off per query.
+
+</QA>
+
+<QA q="What causes LazyInitializationException and how do you fix it properly?" level="medium">
+
+Accessing an uninitialised lazy association after the persistence context closed — typically in a controller or during JSON serialisation. Don't fix it with EAGER or Open Session in View; fetch what the use case needs inside the `@Transactional` service method and return DTOs.
+
+</QA>
+
+<QA q="What is Open Session in View and why disable it?" level="medium">
+
+Spring Boot keeps the persistence context open for the whole web request by default (`spring.jpa.open-in-view=true`, logged as a warning), so lazy loading works in controllers. It hides N+1 queries outside the service layer and holds DB connections longer. Set it to `false` for APIs.
+
+</QA>
+
+<QA q="What is the owning side of a bidirectional relationship?" level="medium">
+
+The side whose table holds the **foreign key** — usually the `@ManyToOne` side with `@JoinColumn`. The inverse side declares `mappedBy`. Only changes on the owning side are written, so keep both sides in sync with helper methods such as `order.addLine(line)`.
+
+</QA>
+
+<QA q="How does @Transactional work?" level="medium">
+
+An AOP proxy intercepts calls; a `TransactionInterceptor` asks the `PlatformTransactionManager` (`JpaTransactionManager`) to begin a transaction and bind the connection to the thread, invokes the method, then commits (flushing dirty entities) or rolls back on exception.
+
+</QA>
+
+<QA q="Which exceptions trigger a rollback by default?" level="medium">
+
+**Unchecked** exceptions and `Error`s. **Checked** exceptions **commit** unless you set `rollbackFor = Exception.class`. An exception caught and swallowed inside the method never reaches the proxy, so the transaction commits.
+
+</QA>
+
+<QA q="REQUIRED vs REQUIRES_NEW propagation?" level="medium">
+
+`REQUIRED` (default) joins the current transaction or starts one; an inner failure marks the whole transaction rollback-only, even if the outer method catches it (`UnexpectedRollbackException` on commit). `REQUIRES_NEW` suspends the current transaction and runs an **independent** one on a second connection — useful for audit records that must survive the caller's rollback.
+
+</QA>
+
+<QA q="Explain transaction isolation levels and the anomalies they prevent." level="hard">
+
+- `READ_UNCOMMITTED` — dirty reads possible.
+- `READ_COMMITTED` (PostgreSQL/Oracle default) — no dirty reads; non-repeatable reads and phantoms possible.
+- `REPEATABLE_READ` (MySQL default) — re-reading a row returns the same data; phantoms possible in theory.
+- `SERIALIZABLE` — behaves as if transactions ran one at a time.
+
+Higher levels cost concurrency; protect specific invariants with optimistic or pessimistic locks instead.
+
+</QA>
+
+<QA q="Optimistic vs pessimistic locking?" level="hard">
+
+**Optimistic** (`@Version`): no locks held; the update includes `where version = ?`, and a concurrent change raises `ObjectOptimisticLockingFailureException` — return 409 or retry. Best when conflicts are rare. **Pessimistic** (`@Lock(PESSIMISTIC_WRITE)`, i.e. `SELECT … FOR UPDATE`) blocks other writers until commit — for hot rows with frequent conflicts, at the cost of contention and deadlock risk.
+
+</QA>
+
+<QA q="What does readOnly = true do?" level="medium">
+
+Hibernate skips dirty checking and entity snapshots (less CPU and memory) and uses manual flush mode; the driver or database may optimise or route to a replica. It also documents intent.
+
+</QA>
+
+<QA q="What are projections and why use them?" level="medium">
+
+Interface or record (DTO) projections select **only the needed columns**: `List<OrderSummary> findByCustomerId(String id)`. They avoid loading associations and dirty checking — often the biggest performance win for read-heavy endpoints.
+
+</QA>
+
+<QA q="How do you handle schema migrations?" level="easy">
+
+Use **Flyway** or **Liquibase**: versioned scripts run on startup (and in tests against Testcontainers). Use `spring.jpa.hibernate.ddl-auto=validate` or `none` in production — never `update` or `create-drop`.
+
+</QA>

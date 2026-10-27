@@ -1,0 +1,119 @@
+---
+title: Spring Boot 4 & REST APIs
+description: Auto-configuration, starters, configuration and profiles, REST design, validation, error handling, HTTP clients and what's new in Boot 4.
+track: spring-boot
+order: 11
+---
+
+## Boot fundamentals
+
+<QA q="What is the difference between Spring and Spring Boot?" level="easy">
+
+Spring Framework provides the building blocks — DI, MVC, transactions, data access. Spring Boot is **convention over configuration** on top: starters with managed versions, **auto-configuration** based on the classpath, an embedded server with executable jars, externalised configuration, and production features through Actuator.
+
+</QA>
+
+<QA q="What does @SpringBootApplication do?" level="easy">
+
+It combines `@SpringBootConfiguration` (a `@Configuration`), `@EnableAutoConfiguration` and `@ComponentScan` of the annotated class's package and sub-packages. Put it in the root package so all components are found.
+
+</QA>
+
+<QA q="How does auto-configuration work?" level="medium">
+
+`@EnableAutoConfiguration` loads the classes listed in `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. Each is a configuration class guarded by conditions such as `@ConditionalOnClass`, `@ConditionalOnProperty` and `@ConditionalOnMissingBean`. Because auto-configured beans use `@ConditionalOnMissingBean`, **your own beans take precedence**. Run with `--debug` or check `/actuator/conditions` to see what matched.
+
+</QA>
+
+<QA q="How do you exclude or override an auto-configuration?" level="medium">
+
+Override by defining your own bean of that type (Boot backs off), or customise via properties or `*Customizer` beans. Exclude entirely with `@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)` or the `spring.autoconfigure.exclude` property.
+
+</QA>
+
+<QA q="What's new in Spring Boot 4 compared to Boot 3?" level="medium">
+
+- Built on **Spring Framework 7** and **Jakarta EE 11** (Servlet 6.1, JPA 3.2 / Hibernate 7, Validation 3.1)
+- **Modular auto-configuration** and renamed starters (e.g. `spring-boot-starter-webmvc`)
+- **Jackson 3** as the default JSON library
+- **JSpecify** null-safety annotations
+- Built-in **API versioning** and HTTP service client registration (`@ImportHttpServices`)
+- Core resilience annotations: `@Retryable`, `@ConcurrencyLimit`
+- `@MockBean` / `@SpyBean` removed in favour of `@MockitoBean` / `@MockitoSpyBean`; new `RestTestClient`
+- Java 17 baseline with first-class Java 21 and 25 support
+
+</QA>
+
+<QA q="What is the order of precedence for configuration properties?" level="medium">
+
+Highest first: command-line arguments → `SPRING_APPLICATION_JSON` → Java system properties → **OS environment variables** → profile-specific files (outside the jar, then inside) → `application.yml` (outside, then inside) → `@PropertySource` → defaults. Relaxed binding maps `PAYMENTS_MAXRETRIES` to `payments.max-retries`.
+
+</QA>
+
+<QA q="@Value vs @ConfigurationProperties?" level="easy">
+
+`@Value` injects a single value and supports SpEL. `@ConfigurationProperties("prefix")` binds a group into a typed object (ideally a **record**) with relaxed binding, `Duration`/`DataSize` conversion, `@Validated` checks at startup and IDE metadata. Prefer it for anything non-trivial.
+
+</QA>
+
+<QA q="How do profiles work?" level="easy">
+
+A profile groups environment-specific configuration and beans. Activate with `spring.profiles.active=prod` (or `SPRING_PROFILES_ACTIVE`); profile-specific files or `spring.config.activate.on-profile` sections apply, and `@Profile("prod")` beans are registered. Use profiles for environment differences and properties for feature toggles.
+
+</QA>
+
+## REST
+
+<QA q="@Controller vs @RestController?" level="easy">
+
+`@RestController` = `@Controller` + `@ResponseBody` on every handler: return values are serialised to the response body (JSON via Jackson) instead of being resolved as view names.
+
+</QA>
+
+<QA q="PUT vs PATCH vs POST?" level="easy">
+
+`POST` creates a resource or triggers a non-idempotent action (→ `201 Created` + `Location`). `PUT` **replaces** a resource with a full representation and is **idempotent**. `PATCH` applies a **partial** update and isn't necessarily idempotent.
+
+</QA>
+
+<QA q="Why shouldn't REST controllers return JPA entities?" level="medium">
+
+It couples the API to the schema, can leak sensitive fields, triggers lazy loading during serialisation (`LazyInitializationException` or N+1 queries), and can recurse through bidirectional relationships. Map entities to response **records** in the service layer.
+
+</QA>
+
+<QA q="How do you version a REST API in Spring Boot 4?" level="medium">
+
+Spring Framework 7 has first-class API versioning. Configure how the version is resolved — header, query parameter, path segment or media type — e.g. `spring.mvc.apiversion.use.header=API-Version`, then declare versions on mappings: `@GetMapping(path = "/{id}", version = "1.1")`. Unsupported versions get a `400`. Only version for **breaking** changes.
+
+</QA>
+
+<QA q="How do you validate a request body?" level="easy">
+
+Add `spring-boot-starter-validation`, put constraints on the DTO (`@NotBlank`, `@Email`, `@Size`, `@Valid` for nested objects) and annotate the parameter with `@Valid @RequestBody`. Failures throw `MethodArgumentNotValidException` → 400. Use `@Validated` on a bean for method-level validation and groups.
+
+</QA>
+
+<QA q="How do you handle exceptions globally?" level="medium">
+
+A `@RestControllerAdvice` with `@ExceptionHandler` methods (often extending `ResponseEntityExceptionHandler`) that map domain exceptions to status codes and return **`ProblemDetail`** (RFC 9457). Enable problem details for built-in MVC errors with `spring.mvc.problemdetails.enabled=true`, and keep a catch-all handler that logs and returns a generic 500 without leaking internals.
+
+</QA>
+
+<QA q="RestTemplate vs RestClient vs WebClient vs HTTP service clients?" level="medium">
+
+`RestTemplate` is legacy (maintenance mode). `RestClient` is its modern fluent synchronous replacement — ideal with virtual threads. `WebClient` is reactive. **HTTP service clients** are `@HttpExchange` interfaces implemented by Spring; in Framework 7 they're registered with `@ImportHttpServices` and configured per group. Always set connect and read timeouts.
+
+</QA>
+
+<QA q="What is the embedded server and how do you change it?" level="easy">
+
+Boot runs Tomcat (default), Jetty, or Netty for WebFlux inside the application, so it ships as an executable jar. Switch by excluding Tomcat and adding the Jetty starter. Undertow support was dropped in Boot 4. Configure via `server.*` properties.
+
+</QA>
+
+<QA q="What does spring.threads.virtual.enabled=true change?" level="medium">
+
+On Java 21+, Tomcat request handling, `@Async`, `@Scheduled`, the application task executor and message listeners use **virtual threads**. Blocking code (JDBC, `RestClient`) then scales like reactive code for I/O-bound workloads. Downstream limits — the connection pool, rate-limited APIs — become the throttle, so size them deliberately.
+
+</QA>

@@ -1,0 +1,122 @@
+---
+title: Docker & GraalVM Native Images
+description: Containerising Spring Boot with layered jars and buildpacks, JVM tuning in containers, CDS for faster startup, and GraalVM native images.
+group: Production & Microservices
+order: 6
+level: advanced
+tags: [docker, graalvm, native, deployment]
+---
+
+## Option 1: Cloud Native Buildpacks (no Dockerfile)
+
+```bash
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=registry.example.com/shop:1.4.0
+```
+
+Boot builds an OCI image with a JRE, your layered application, sensible memory settings and a non-root user — no Dockerfile to maintain, and base-image security updates come from rebuilding.
+
+## Option 2: A layered Dockerfile
+
+Spring Boot jars can be **extracted into layers** so that dependency layers (which rarely change) are cached separately from your classes (which change on every commit):
+
+```dockerfile
+# ---- build stage ----
+FROM eclipse-temurin:25-jdk AS build
+WORKDIR /workspace
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN ./mvnw -q dependency:go-offline
+COPY src src
+RUN ./mvnw -q package -DskipTests \
+ && java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination target/extracted
+
+# ---- runtime stage ----
+FROM eclipse-temurin:25-jre
+RUN useradd --system --uid 1001 app
+USER app
+WORKDIR /app
+COPY --from=build /workspace/target/extracted/dependencies/ ./
+COPY --from=build /workspace/target/extracted/spring-boot-loader/ ./
+COPY --from=build /workspace/target/extracted/snapshot-dependencies/ ./
+COPY --from=build /workspace/target/extracted/application/ ./
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+EXPOSE 8080
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
+```
+
+Key points:
+
+- **Multi-stage**: the JDK and Maven stay in the build stage; the runtime image only has a JRE.
+- **Non-root user**.
+- **`MaxRAMPercentage`** sizes the heap from the container's memory limit instead of a hard-coded `-Xmx`.
+- **`ExitOnOutOfMemoryError`** lets the orchestrator restart a broken JVM instead of leaving it limping.
+
+## Faster startup with CDS and AOT cache
+
+A typical Spring Boot service starts in a few seconds — fine for long-running pods, painful for scale-to-zero. Without leaving the JVM:
+
+- **Class Data Sharing (CDS)**: run the app once in "training" mode to produce an archive of parsed classes, then start with it — often **30–40% faster startup**:
+
+```bash
+java -XX:ArchiveClassesAtExit=app.jsa -Dspring.context.exit=onRefresh -jar app.jar   # training run
+java -XX:SharedArchiveFile=app.jsa -jar app.jar                                     # production
+```
+
+- On **Java 25**, the **AOT cache** (Project Leyden, `-XX:AOTCacheOutput=app.aot` then `-XX:AOTCache=app.aot`) goes further by caching loaded and linked classes and method profiles.
+- **Lazy initialisation** and trimming unused starters also help.
+
+## GraalVM native images
+
+GraalVM's `native-image` compiles your application **ahead of time** into a standalone executable — no JVM at runtime.
+
+| | JVM (JIT) | Native image (AOT) |
+| --- | --- | --- |
+| Startup | Seconds | **Tens of milliseconds** |
+| Memory (RSS) | Higher | **Much lower** |
+| Peak throughput | **Higher** (profile-guided JIT) | Lower without PGO |
+| Build time | Seconds | Minutes, memory-hungry |
+| Dynamic features | Everything | Reflection, proxies, resources must be known at build time |
+| Best for | Long-running services | Serverless, CLIs, scale-to-zero, dense deployments |
+
+### How Spring makes it work
+
+Native images assume a **closed world**: everything reachable must be known at build time. Spring Boot's **AOT engine** runs at build time, evaluates `@Conditional`s, generates the bean definitions as plain Java code, and emits **reachability metadata** (reflection, proxy and resource hints) for GraalVM.
+
+```bash
+# with the native build tools plugin (inherited from spring-boot-starter-parent's native profile)
+./mvnw -Pnative native:compile          # local executable (needs GraalVM 25+)
+./mvnw -Pnative spring-boot:build-image # native container image via buildpacks — no local GraalVM needed
+```
+
+If you use reflection that Spring can't see — say, a library loading classes by name — register hints:
+
+```java
+@Configuration
+@ImportRuntimeHints(ShopHints.class)
+class NativeConfig {}
+
+class ShopHints implements RuntimeHintsRegistrar {
+    @Override
+    public void registerHints(RuntimeHints hints, ClassLoader cl) {
+        hints.reflection().registerType(LegacyReportFormat.class, MemberCategory.INVOKE_PUBLIC_METHODS);
+        hints.resources().registerPattern("templates/reports/*.ftl");
+    }
+}
+```
+
+<Callout type="warn" title="Native trade-offs">
+Profiles and `@Conditional` beans are fixed at **build time** — you can't switch `@Profile`-guarded beans on and off at runtime as freely as on the JVM. Test the native executable in CI (`-Pnative test` runs your tests as native), because a missing hint only fails when that code path runs.
+</Callout>
+
+## Kubernetes checklist
+
+- Liveness and readiness probes on `/actuator/health/liveness` and `/readiness`
+- Graceful shutdown with a `preStop` delay
+- Resource **requests and limits**; heap via `MaxRAMPercentage`
+- Configuration from ConfigMaps/env vars, secrets from mounted files or a secrets manager
+- One process per container, logs to stdout as structured JSON
+- Immutable, tagged images (`shop:1.4.0`, not `latest`), scanned for CVEs
+
+<Callout type="interview">
+*“How do you containerise a Spring Boot app?”* — buildpacks or a multi-stage Dockerfile with layered jars, non-root user, JRE base image, container-aware memory flags. *“JVM vs GraalVM native image?”* — startup/memory vs peak throughput/build complexity; Spring's AOT engine generates hints. *“How would you reduce startup time without going native?”* — CDS/AOT cache, lazy init, fewer starters.
+</Callout>

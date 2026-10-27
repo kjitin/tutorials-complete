@@ -1,0 +1,148 @@
+---
+title: Configuration, Properties & Profiles
+description: application.yml, property precedence, type-safe @ConfigurationProperties with records and validation, profiles and secrets.
+group: Core Concepts
+order: 5
+level: beginner
+tags: [spring-boot, configuration, profiles]
+---
+
+## Externalised configuration
+
+Boot reads configuration from many sources and merges them into one `Environment`. The same jar runs in every environment; only the configuration changes.
+
+```yaml
+# src/main/resources/application.yml
+spring:
+  application:
+    name: shop
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shop
+    username: shop
+server:
+  port: 8080
+payments:
+  base-url: https://api.payments.example
+  timeout: 3s
+  max-retries: 3
+  supported-currencies: [GBP, EUR, USD]
+```
+
+### Precedence (highest wins)
+
+1. Command-line arguments — `--server.port=9090`
+2. `SPRING_APPLICATION_JSON`
+3. Java system properties — `-Dserver.port=9090`
+4. **OS environment variables** — `SERVER_PORT=9090`
+5. Profile-specific files outside the jar, then inside — `application-prod.yml`
+6. `application.yml` / `.properties` outside the jar, then inside
+7. `@PropertySource` and defaults
+
+**Relaxed binding** maps `payments.max-retries`, `PAYMENTS_MAXRETRIES`, `payments.maxRetries` to the same property — which is how environment variables in Kubernetes override YAML.
+
+## Type-safe properties with records
+
+Prefer `@ConfigurationProperties` over scattering `@Value("${...}")`: it's typed, grouped, validated, documented by IDE metadata, and testable.
+
+```java
+@Validated
+@ConfigurationProperties("payments")
+public record PaymentProperties(
+        @NotNull URI baseUrl,
+        @DefaultValue("5s") Duration timeout,
+        @Min(0) @Max(10) int maxRetries,
+        @DefaultValue({"GBP"}) Set<Currency> supportedCurrencies) {
+}
+```
+
+```java
+@SpringBootApplication
+@ConfigurationPropertiesScan          // registers every @ConfigurationProperties type
+public class ShopApplication { ... }
+
+@Service
+class PaymentClient {
+    PaymentClient(PaymentProperties props, RestClient.Builder builder) {
+        this.client = builder.baseUrl(props.baseUrl().toString()).build();
+        this.timeout = props.timeout();
+    }
+}
+```
+
+Boot converts strings into `Duration` (`3s`, `500ms`, `PT1M`), `DataSize` (`10MB`), `URI`, enums, `Currency`, lists and maps. With `@Validated`, a bad value fails **at startup** with a clear message instead of in production at 3 a.m.
+
+<Callout type="tip">
+Add `spring-boot-configuration-processor` as an annotation processor and your IDE gets auto-completion and documentation for your own properties, just like for `spring.*` ones.
+</Callout>
+
+## @Value — for one-off values
+
+```java
+@Value("${feature.new-checkout:false}") boolean newCheckout;       // with a default
+@Value("#{${limits.per-tier}}") Map<String, Integer> limits;       // SpEL
+```
+
+## Profiles
+
+A **profile** is a named set of configuration and beans, activated per environment.
+
+```yaml
+# application.yml — shared defaults
+spring:
+  jpa:
+    open-in-view: false
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:h2:mem:shop
+logging:
+  level:
+    org.hibernate.SQL: debug
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+server:
+  shutdown: graceful
+```
+
+Activate with `SPRING_PROFILES_ACTIVE=prod`, `--spring.profiles.active=prod`, or in tests with `@ActiveProfiles("test")`. Beans can be profile-specific:
+
+```java
+@Configuration
+class StorageConfig {
+    @Bean @Profile("!prod")  FileStore localStore() { return new LocalFileStore(Path.of("/tmp/uploads")); }
+    @Bean @Profile("prod")   FileStore s3Store(S3Client s3) { return new S3FileStore(s3, "shop-uploads"); }
+}
+```
+
+**Profile groups** bundle several: `spring.profiles.group.prod=prod-db,prod-observability`.
+
+<Callout type="warn" title="Don't overuse profiles for behaviour">
+Profiles are best for **environment** differences (URLs, credentials, infrastructure). For **feature** toggles prefer properties (`@ConditionalOnProperty`, `features.new-checkout=true`) — they can be flipped without inventing a new profile combination.
+</Callout>
+
+## Importing more config and secrets
+
+```yaml
+spring:
+  config:
+    import:
+      - optional:file:./config/local.yml        # developer overrides, not committed
+      - optional:configtree:/run/secrets/        # Kubernetes/Docker secrets mounted as files
+```
+
+**Never commit secrets.** Inject them via environment variables, mounted secret files (`configtree:`), or a secrets manager integration (Vault, AWS Secrets Manager, Azure Key Vault).
+
+## Inspecting configuration
+
+- `/actuator/env` — every property source and value (sanitised)
+- `/actuator/configprops` — all `@ConfigurationProperties` beans and their bound values
+
+<Callout type="interview">
+*“How do you manage environment-specific configuration?”* — externalised config + profiles + environment variables/secret stores; same artifact everywhere (12-factor). *“`@Value` vs `@ConfigurationProperties`?”* — single value with SpEL vs typed, validated, grouped binding with relaxed names and metadata. *“What's the property precedence?”* — command line > env vars > profile-specific files > application files > defaults.
+</Callout>

@@ -1,0 +1,118 @@
+---
+title: Modern Java (17–21)
+description: Records, sealed types, pattern matching, switch expressions, text blocks, var and virtual threads.
+track: java
+order: 4
+---
+
+<QA q="What is a record and what does the compiler generate for it?" level="easy">
+
+A record is a transparent, immutable data carrier: `record Point(int x, int y) {}`. The compiler generates `private final` fields, a canonical constructor, accessors `x()` and `y()`, and `equals`, `hashCode` and `toString` based on all components. Records are implicitly `final`, extend `java.lang.Record`, can implement interfaces, and can't declare extra instance fields.
+
+</QA>
+
+<QA q="How do you validate data in a record?" level="medium">
+
+Use a **compact constructor** — it has no parameter list and assigns the fields after its body runs, so you can validate and normalise:
+
+```java
+record Email(String value) {
+    Email {
+        Objects.requireNonNull(value);
+        value = value.strip().toLowerCase();
+        if (!value.contains("@")) throw new IllegalArgumentException("invalid email");
+    }
+}
+```
+
+</QA>
+
+<QA q="Are records fully immutable?" level="medium">
+
+Only **shallowly**. Fields are final, but a mutable component (a `List`, an array) can still be modified through its reference. Defensively copy in the compact constructor (`items = List.copyOf(items)`), and avoid arrays as components — their `equals` is identity-based.
+
+</QA>
+
+<QA q="Can a record be a JPA entity?" level="medium">
+
+No. JPA entities need a no-arg constructor, mutable state and non-final classes for proxies — all incompatible with records. Use records for **DTOs, projections, value objects** and `@ConfigurationProperties`; Hibernate 6.2+ also supports records as `@Embeddable` types.
+
+</QA>
+
+<QA q="What are sealed classes and why are they useful?" level="medium">
+
+`sealed interface Shape permits Circle, Square {}` restricts which types may implement or extend it. Each permitted subtype must be `final`, `sealed` or `non-sealed`. Benefits: model a **closed set of alternatives** and let the compiler check **exhaustiveness** in `switch` — add a new subtype and every non-exhaustive switch stops compiling, instead of silently hitting a `default`.
+
+</QA>
+
+<QA q="Explain pattern matching for switch with an example." level="medium">
+
+Java 21 lets `switch` match on types, deconstruct records and use guards:
+
+```java
+double area(Shape s) {
+    return switch (s) {
+        case Circle c -> Math.PI * c.r() * c.r();
+        case Rect(double w, double h) when w == h -> w * w;
+        case Rect(double w, double h) -> w * h;
+    };
+}
+```
+
+No `default` is needed for a sealed hierarchy. Without `case null`, a null selector throws NPE. More specific patterns must come before more general ones (dominance).
+
+</QA>
+
+<QA q="Switch statement vs switch expression?" level="easy">
+
+A switch **expression** produces a value, must be **exhaustive**, and with arrow labels (`case A, B ->`) has **no fall-through**. Use `yield` to return a value from a block body. The classic colon form still falls through without `break`.
+
+</QA>
+
+<QA q="What is var? Is Java now dynamically typed?" level="easy">
+
+`var` is **local variable type inference** (Java 10): the compiler infers the static type from the initialiser, and the type is fixed at compile time — not dynamic typing. It can't be used for fields, parameters or return types, or without an initialiser. Use it where the type is obvious from the right-hand side.
+
+</QA>
+
+<QA q="What are text blocks, and what do the backslash and \s escapes do?" level="easy">
+
+Text blocks (Java 15) are multi-line string literals delimited by triple quotes, with incidental indentation stripped. A backslash at the end of a line joins it with the next line (no newline); `\s` inserts a space that won't be stripped as trailing whitespace.
+
+</QA>
+
+<QA q="What are virtual threads and how do they differ from platform threads?" level="medium">
+
+**Platform threads** wrap OS threads (≈1 MB stack, kernel-scheduled, a few thousand per JVM). **Virtual threads** (Java 21) are JVM-managed: millions can exist, and when one blocks on I/O it **unmounts** from its carrier OS thread so the carrier can run others. You write simple blocking code and get the throughput of asynchronous I/O.
+
+</QA>
+
+<QA q="Should you pool virtual threads?" level="medium">
+
+No. They're cheap; the intended model is **one virtual thread per task** (`Executors.newVirtualThreadPerTaskExecutor()`). To limit concurrency against a scarce resource such as a database, use a `Semaphore` (or Spring's `@ConcurrencyLimit`), not a small pool.
+
+</QA>
+
+<QA q="What is pinning in virtual threads?" level="hard">
+
+A virtual thread is **pinned** to its carrier — it can't unmount while blocked — when it blocks inside a `synchronized` block/method (Java 21–23) or during native calls. Frequent, long pinning reduces throughput to that of platform threads. On Java 21, prefer `ReentrantLock` around blocking I/O and diagnose with `-Djdk.tracePinnedThreads` or JFR. **Java 24** (JEP 491) removed the `synchronized` limitation.
+
+</QA>
+
+<QA q="When do virtual threads NOT help?" level="medium">
+
+For **CPU-bound** work (cores are the limit), very short non-blocking tasks, or code already using efficient non-blocking I/O. They improve **throughput** of I/O-bound workloads, not the latency of a single request. Also watch heavy `ThreadLocal` usage — each of a million threads gets its own copy.
+
+</QA>
+
+<QA q="What Java 21 features would you highlight when proposing an upgrade from Java 17?" level="hard">
+
+- **Virtual threads** — thread-per-request scalability without reactive code
+- **Pattern matching for switch** and **record patterns** — safer, shorter domain logic
+- **Sequenced collections** — uniform first/last access
+- **Generational ZGC** — sub-millisecond pauses with better throughput
+- Small wins: `StringBuilder.repeat`, `Math.clamp`, `String.indexOf` ranges
+
+Mention it's an **LTS** release and that Spring Boot 4 and Hibernate 7 take full advantage.
+
+</QA>

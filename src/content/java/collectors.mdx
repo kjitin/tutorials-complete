@@ -1,0 +1,126 @@
+---
+title: Collectors Deep Dive
+description: groupingBy, partitioningBy, toMap, downstream collectors, teeing and writing your own Collector.
+group: Functional Java (Java 8+)
+order: 4
+level: intermediate
+tags: [java8, streams, collectors]
+---
+
+`collect(...)` is the most powerful terminal operation: it accumulates stream elements into a result using a **Collector**. The `java.util.stream.Collectors` class provides dozens of ready-made ones that **compose** like SQL's `GROUP BY` with aggregate functions.
+
+## The essentials
+
+| Collector | Result | SQL analogy |
+| --- | --- | --- |
+| `toList()`, `toSet()`, `toCollection(TreeSet::new)` | Collection | `SELECT` |
+| `joining(", ", "[", "]")` | `String` | `STRING_AGG` |
+| `toMap(keyFn, valueFn, mergeFn)` | `Map` | — |
+| `groupingBy(classifier)` | `Map<K, List<T>>` | `GROUP BY` |
+| `groupingBy(classifier, downstream)` | `Map<K, R>` | `GROUP BY` + aggregate |
+| `partitioningBy(predicate)` | `Map<Boolean, List<T>>` | `GROUP BY condition` |
+| `counting()`, `summingInt`, `averagingDouble` | number | `COUNT`, `SUM`, `AVG` |
+| `minBy`, `maxBy` | `Optional<T>` | `MIN`, `MAX` |
+| `mapping(fn, downstream)`, `filtering`, `flatMapping` | adapts downstream | — |
+| `collectingAndThen(c, finisher)` | post-processed | — |
+| `teeing(c1, c2, merger)` (Java 12) | combine two results | — |
+
+## Grouping in action
+
+<Playground title="Collectors.java">
+
+```java
+import java.util.*;
+import java.util.stream.*;
+import static java.util.stream.Collectors.*;
+
+record Employee(String name, String dept, String city, double salary, int age) {}
+
+class Main {
+    public static void main(String[] args) {
+        List<Employee> staff = List.of(
+            new Employee("Ada", "Eng", "London", 120_000, 36),
+            new Employee("Bob", "Sales", "Leeds", 65_000, 44),
+            new Employee("Cy", "Eng", "Leeds", 95_000, 29),
+            new Employee("Dee", "Eng", "London", 105_000, 41),
+            new Employee("Eve", "Sales", "London", 72_000, 31),
+            new Employee("Fay", "HR", "Leeds", 58_000, 27));
+
+        // GROUP BY dept -> COUNT(*)  (TreeMap for sorted output)
+        Map<String, Long> headcount = staff.stream().collect(groupingBy(Employee::dept, TreeMap::new, counting()));
+        System.out.println("Headcount:      " + headcount);
+
+        // GROUP BY dept -> AVG(salary)
+        Map<String, Double> avgSalary = staff.stream().collect(groupingBy(Employee::dept, TreeMap::new, averagingDouble(Employee::salary)));
+        System.out.println("Avg salary:     " + avgSalary);
+
+        // GROUP BY dept -> names, sorted, joined
+        Map<String, String> names = staff.stream().collect(groupingBy(Employee::dept, TreeMap::new,
+            mapping(Employee::name, collectingAndThen(toList(), l -> l.stream().sorted().collect(joining("/"))))));
+        System.out.println("Names:          " + names);
+
+        // Multi-level grouping: dept -> city -> count
+        Map<String, Map<String, Long>> byDeptCity = staff.stream()
+            .collect(groupingBy(Employee::dept, TreeMap::new, groupingBy(Employee::city, TreeMap::new, counting())));
+        System.out.println("Dept/city:      " + byDeptCity);
+
+        // Highest earner per department
+        Map<String, String> topEarner = staff.stream().collect(groupingBy(Employee::dept, TreeMap::new,
+            collectingAndThen(maxBy(Comparator.comparingDouble(Employee::salary)), o -> o.map(Employee::name).orElse("-"))));
+        System.out.println("Top earner:     " + topEarner);
+
+        // partitioningBy always has both true and false keys
+        Map<Boolean, List<String>> seniors = staff.stream().collect(partitioningBy(e -> e.age() >= 40, mapping(Employee::name, toList())));
+        System.out.println("40+ / under 40: " + seniors);
+
+        // toMap with merge function (duplicate keys!) and a LinkedHashMap
+        Map<String, Double> payrollByCity = staff.stream()
+            .collect(toMap(Employee::city, Employee::salary, Double::sum, LinkedHashMap::new));
+        System.out.println("Payroll/city:   " + payrollByCity);
+
+        // teeing: compute two aggregates in one pass
+        String range = staff.stream().collect(teeing(
+            minBy(Comparator.comparingDouble(Employee::salary)),
+            maxBy(Comparator.comparingDouble(Employee::salary)),
+            (min, max) -> min.get().name() + " .. " + max.get().name()));
+        System.out.println("Salary range:   " + range);
+
+        DoubleSummaryStatistics stats = staff.stream().collect(summarizingDouble(Employee::salary));
+        System.out.printf("Stats:          n=%d min=%.0f max=%.0f avg=%.0f%n", stats.getCount(), stats.getMin(), stats.getMax(), stats.getAverage());
+    }
+}
+```
+
+</Playground>
+
+<Callout type="danger" title="toMap and duplicate keys">
+`Collectors.toMap(keyFn, valueFn)` **throws `IllegalStateException`** on a duplicate key. Always ask: can two elements map to the same key? If yes, pass a merge function: `toMap(k, v, (a, b) -> a)` or `Double::sum`. `toMap` also throws on `null` values.
+</Callout>
+
+## Writing your own Collector
+
+A collector is four functions: **supplier** (new container), **accumulator** (add an element), **combiner** (merge two containers — for parallel streams) and **finisher** (convert to the result).
+
+```java
+// Collect strings into a single comma-separated line, max 3 items then "…"
+Collector<String, List<String>, String> preview = Collector.of(
+    ArrayList::new,                                    // supplier
+    List::add,                                         // accumulator
+    (a, b) -> { a.addAll(b); return a; },              // combiner
+    list -> list.size() <= 3                           // finisher
+        ? String.join(", ", list)
+        : String.join(", ", list.subList(0, 3)) + ", …");
+
+Stream.of("a", "b", "c", "d", "e").collect(preview);   // "a, b, c, …"
+```
+
+## Performance notes
+
+- `groupingBy` uses a `HashMap` by default — pass `TreeMap::new` or `LinkedHashMap::new` when order matters.
+- `groupingByConcurrent` is the parallel-friendly variant (unordered).
+- `counting()` returns `Long`; use `summingInt(e -> 1)` if you need `Integer`.
+- `stream().toList()` is shorter and returns an unmodifiable list; `collect(toList())` is still fine when you need a mutable result in practice — but prefer `toCollection(ArrayList::new)` if you *rely* on mutability.
+
+<Callout type="interview">
+Live-coding favourites: *“Group employees by department and find the average salary”*, *“Find the second highest salary”* (`sorted(reverseOrder()).skip(1).findFirst()` or `distinct()` first if duplicates matter), *“Count word frequencies”* (`groupingBy(Function.identity(), counting())`), and *“Partition numbers into even and odd”*. Practise writing them without an IDE.
+</Callout>

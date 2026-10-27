@@ -1,0 +1,128 @@
+---
+title: Concurrency & Multithreading
+description: Threads, executors, synchronized vs volatile, the memory model, locks, atomics, deadlocks and CompletableFuture.
+track: java
+order: 5
+---
+
+## Threads and executors
+
+<QA q="What is the difference between start() and run()?" level="easy">
+
+`start()` asks the JVM to create a **new thread** that then calls `run()`. Calling `run()` directly just executes the method **on the current thread** like any other call — no concurrency. Calling `start()` twice throws `IllegalThreadStateException`.
+
+</QA>
+
+<QA q="Runnable vs Callable?" level="easy">
+
+`Runnable.run()` returns nothing and can't throw checked exceptions. `Callable<V>.call()` returns a value and may throw `Exception`. Submitting a `Callable` to an `ExecutorService` yields a `Future<V>`; an exception thrown by the task surfaces as an `ExecutionException` from `future.get()`.
+
+</QA>
+
+<QA q="What are the thread states in Java?" level="medium">
+
+`NEW` → `RUNNABLE` (running or ready) → possibly `BLOCKED` (waiting for a monitor), `WAITING` (`wait`, `join`, `park` without timeout) or `TIMED_WAITING` (`sleep`, timed `wait`/`join`) → back to `RUNNABLE` → `TERMINATED`. The JVM doesn't distinguish "running" from "ready to run".
+
+</QA>
+
+<QA q="shutdown() vs shutdownNow()?" level="easy">
+
+`shutdown()` stops accepting new tasks but lets queued and running tasks finish. `shutdownNow()` **interrupts** running tasks and returns the tasks still in the queue. The usual pattern: `shutdown()`, then `awaitTermination(timeout)`, then `shutdownNow()` if it didn't finish. Since Java 19, `ExecutorService` is `AutoCloseable`.
+
+</QA>
+
+<QA q="How do you size a thread pool?" level="medium">
+
+- **CPU-bound**: about the number of cores (`availableProcessors()`), maybe +1.
+- **I/O-bound** platform threads: `cores × (1 + waitTime / computeTime)`.
+- On Java 21, use **virtual threads** for I/O-bound work instead of tuning a big pool.
+
+Also bound the **queue** and pick a rejection policy — `Executors.newFixedThreadPool` uses an unbounded queue that can grow until `OutOfMemoryError`.
+
+</QA>
+
+<QA q="When does a ThreadPoolExecutor create threads beyond its core size?" level="hard">
+
+Only when the **queue is full**. Submission order: if fewer than `corePoolSize` threads → start a thread; else try to **enqueue**; if the queue is full and fewer than `maximumPoolSize` threads → start a thread; else **reject**. With an unbounded queue, the pool never grows past the core size — `maximumPoolSize` is ignored.
+
+</QA>
+
+## Memory model and locking
+
+<QA q="synchronized vs volatile?" level="medium">
+
+`synchronized` provides **mutual exclusion and visibility**: one thread at a time in the critical section, and everything written before the unlock is visible to the next locker. `volatile` provides **visibility and ordering** for a single variable but **no atomicity** for compound actions. Use `volatile` for flags and safely published references; use locks or atomics for read-modify-write.
+
+</QA>
+
+<QA q="Is count++ on a volatile int thread-safe?" level="medium">
+
+No. `count++` is read, add, write — two threads can read the same value and both write `n + 1`, losing an update. `volatile` only guarantees each read sees the latest write. Use `AtomicInteger.incrementAndGet()`, `LongAdder`, or a lock.
+
+</QA>
+
+<QA q="What is the happens-before relationship?" level="hard">
+
+The JMM's rule for when one thread's write is guaranteed visible to another's read. Key edges: unlocking a monitor → later lock of the same monitor; a `volatile` write → later reads of it; `Thread.start()` → actions in the new thread; a thread's actions → another thread's successful `join()`; completing a `Future` → `get()`. Without a happens-before path you have a **data race** and may read stale values.
+
+</QA>
+
+<QA q="Why does double-checked locking need a volatile field?" level="hard">
+
+Without `volatile`, the write of the reference can be reordered before the constructor's field writes, so another thread may see a **non-null but partially constructed** object. `volatile` forbids that reordering and publishes the fully constructed object. Simpler alternatives: the initialization-on-demand holder idiom or an `enum`.
+
+</QA>
+
+<QA q="What is a deadlock and how do you prevent it?" level="medium">
+
+Threads waiting on each other's locks in a cycle (T1 holds A, wants B; T2 holds B, wants A). Prevention: acquire locks in a **global order**; use `tryLock(timeout)` and back off; minimise lock scope and never call unknown code while holding a lock; prefer higher-level concurrency utilities. Diagnose with a thread dump (`jstack`, `jcmd Thread.print`) — the JVM reports detected deadlocks.
+
+</QA>
+
+<QA q="synchronized vs ReentrantLock?" level="medium">
+
+Both are reentrant and give the same memory semantics. `ReentrantLock` adds `tryLock()` (with timeout), `lockInterruptibly()`, optional **fairness**, and multiple `Condition`s — but you must `unlock()` in `finally`. `synchronized` is simpler and can't be forgotten. On Java 21, `ReentrantLock` also avoids virtual-thread pinning around blocking calls.
+
+</QA>
+
+<QA q="How does AtomicInteger work without locks?" level="medium">
+
+Via **compare-and-swap (CAS)**, a CPU instruction that updates a value only if it still equals the expected one. `incrementAndGet` loops: read, compute, CAS; retry if another thread won. It's lock-free — threads never block — but under heavy contention retries spin, which is why `LongAdder` (striped cells) is faster for hot counters.
+
+</QA>
+
+<QA q="CountDownLatch vs CyclicBarrier vs Semaphore?" level="medium">
+
+- `CountDownLatch` — one-shot; threads wait until a count reaches zero (e.g. wait for N services to start).
+- `CyclicBarrier` — reusable rendezvous; a fixed number of threads wait for each other at a point, phase after phase.
+- `Semaphore` — N permits limit concurrent access to a resource (connection limits, throttling).
+
+</QA>
+
+<QA q="What is the producer-consumer problem and how do you solve it in Java?" level="easy">
+
+Producers add work and consumers remove it at different rates. Use a **`BlockingQueue`** — `put` blocks when a bounded queue is full (back-pressure) and `take` blocks when empty — instead of hand-written `wait`/`notify`. Shut consumers down with a poison-pill item or by interrupting them.
+
+</QA>
+
+## CompletableFuture
+
+<QA q="thenApply vs thenCompose vs thenCombine?" level="medium">
+
+- `thenApply(fn)` — transform the result (`map`).
+- `thenCompose(fn)` — chain a **dependent** async call whose function returns a `CompletableFuture` (`flatMap`); avoids nested futures.
+- `thenCombine(other, fn)` — combine two **independent** futures when both complete.
+
+</QA>
+
+<QA q="How do you handle exceptions in a CompletableFuture chain?" level="medium">
+
+An exception completes the stage exceptionally and skips dependent stages until a handler: `exceptionally(ex -> fallback)`, `handle((result, ex) -> ...)` (both success and failure), or `whenComplete` (observe without changing the result). Exceptions arrive wrapped in `CompletionException` — unwrap with `getCause()`. Also consider `orTimeout` / `completeOnTimeout`.
+
+</QA>
+
+<QA q="Why should you pass a custom executor to supplyAsync?" level="hard">
+
+Without one, async stages run on `ForkJoinPool.commonPool()`, sized for CPU work (cores - 1) and shared by the whole JVM, including parallel streams. Blocking I/O there starves everything else. Pass a dedicated executor — on Java 21, `Executors.newVirtualThreadPerTaskExecutor()` is a good fit for I/O.
+
+</QA>

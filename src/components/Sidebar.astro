@@ -1,0 +1,159 @@
+---
+import Icon from './Icon.astro';
+import { groupLessons, lessonKey, lessonUrl, type Lesson } from '../lib/lessons';
+import type { Track } from '../site.config';
+
+interface Props {
+  track: Track;
+  lessons: Lesson[];
+  currentId?: string;
+}
+const { track, lessons, currentId } = Astro.props;
+const groups = groupLessons(track.id, lessons);
+---
+
+<nav class="sidebar" aria-label={`${track.title} lessons`} style={`--accent:${track.accent}`}>
+  <a href={`/${track.id}/`} class="sb-track">
+    <span class="sb-icon"><Icon name={track.icon} size={16} /></span>
+    {track.title}
+  </a>
+  <div class="sb-progress" data-track-progress={track.id} data-total={lessons.length}>
+    <div class="progress-bar"><span></span></div>
+    <span class="sb-count"><b>0</b>/{lessons.length} completed</span>
+  </div>
+  {
+    groups.map((g) => (
+      <div class="sb-group">
+        <div class="sb-group-title">{g.group}</div>
+        <ul>
+          {g.lessons.map((l) => (
+            <li>
+              <a
+                href={lessonUrl(track.id, l.id)}
+                class:list={{ current: l.id === currentId }}
+                aria-current={l.id === currentId ? 'page' : undefined}
+                data-lesson-key={lessonKey(track.id, l.id)}
+              >
+                <span class="sb-dot">
+                  <Icon name="check" size={11} stroke={3} />
+                </span>
+                <span>{l.data.title}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))
+  }
+</nav>
+
+<script>
+  import { progress } from '../scripts/progress';
+
+  function paint() {
+    const done = new Set(progress.completed());
+    document.querySelectorAll<HTMLAnchorElement>('[data-lesson-key]').forEach((a) => {
+      a.classList.toggle('done', done.has(a.dataset.lessonKey!));
+    });
+    document.querySelectorAll<HTMLElement>('[data-track-progress]').forEach((el) => {
+      const track = el.dataset.trackProgress!;
+      const total = Number(el.dataset.total);
+      const count = [...done].filter((k) => k.startsWith(track + '/')).length;
+      el.querySelector('b')!.textContent = String(count);
+      el.querySelector<HTMLElement>('.progress-bar span')!.style.width = `${total ? (count / total) * 100 : 0}%`;
+    });
+  }
+  paint();
+  window.addEventListener('jf:progress', paint);
+</script>
+
+<style>
+  .sidebar {
+    font-size: 14px;
+  }
+  .sb-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    margin-bottom: 14px;
+  }
+  .sb-icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .sb-progress {
+    margin-bottom: 22px;
+  }
+  .sb-count {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sb-count b {
+    color: var(--text);
+  }
+  .sb-group + .sb-group {
+    margin-top: 20px;
+  }
+  .sb-group-title {
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px 10px;
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  li a {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--text-soft);
+    line-height: 1.4;
+    transition: background 0.12s, color 0.12s;
+  }
+  li a:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  li a.current {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--text);
+    font-weight: 550;
+  }
+  .sb-dot {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-strong);
+    color: transparent;
+  }
+  li a.current .sb-dot {
+    border-color: var(--accent);
+  }
+  li a:global(.done) .sb-dot {
+    background: var(--ok);
+    border-color: var(--ok);
+    color: #fff;
+  }
+</style>

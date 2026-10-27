@@ -1,0 +1,120 @@
+---
+title: Collections
+description: HashMap internals, List/Set/Map trade-offs, fail-fast iterators, concurrent and immutable collections.
+track: java
+order: 2
+---
+
+<QA q="How does HashMap work internally?" level="hard">
+
+An array of **buckets** (`Node[] table`). `put(k, v)`:
+
+1. `hash = k.hashCode()` spread with `h ^ (h >>> 16)`.
+2. Index = `hash & (capacity - 1)` (capacity is a power of two).
+3. Empty bucket → new node. Otherwise walk the bucket: same hash and `equals` → replace value; else append.
+4. A bucket with **8+** nodes is converted to a **red-black tree** (if capacity ≥ 64), giving O(log n) worst case.
+5. When `size > capacity × 0.75`, the table **doubles**; each node stays at `i` or moves to `i + oldCap`.
+
+`get` repeats steps 1–3. That's why `equals` and `hashCode` must be consistent and keys should be immutable.
+
+</QA>
+
+<QA q="Why is the default load factor 0.75?" level="medium">
+
+It's a trade-off between **memory** and **collision probability**. Lower values waste space with mostly-empty buckets; higher values make buckets longer and lookups slower. At 0.75 the expected bucket length stays very small, while about a quarter of the table is unused.
+
+</QA>
+
+<QA q="What happens if you use a mutable object as a HashMap key and then change it?" level="medium">
+
+If a field used in `hashCode` changes, the entry stays in the bucket for its **old** hash. `get` with the mutated key computes a new hash and looks in the wrong bucket — the entry becomes unreachable (effectively leaked) though it still counts in `size()`. Use immutable keys: `String`, boxed types, records with immutable components.
+
+</QA>
+
+<QA q="HashMap vs Hashtable vs ConcurrentHashMap vs Collections.synchronizedMap?" level="medium">
+
+| | Thread-safe | Nulls | Locking |
+| --- | --- | --- | --- |
+| `HashMap` | No | 1 null key, null values | — |
+| `Hashtable` | Yes (legacy) | No | Every method synchronised |
+| `Collections.synchronizedMap` | Yes | As wrapped map | One lock for the whole map |
+| `ConcurrentHashMap` | Yes | **No** | CAS + per-bucket locks; lock-free reads |
+
+Use `ConcurrentHashMap` for shared maps.
+
+</QA>
+
+<QA q="Why doesn't ConcurrentHashMap allow null keys or values?" level="hard">
+
+In a concurrent map, `get(key) == null` must unambiguously mean "absent". With nulls you couldn't distinguish "absent" from "mapped to null" without a separate `containsKey` call — and another thread could change the map between the two calls. Disallowing nulls removes that race.
+
+</QA>
+
+<QA q="ArrayList vs LinkedList — which would you choose and why?" level="easy">
+
+Almost always **`ArrayList`**: O(1) random access, contiguous memory (cache-friendly), low per-element overhead. `LinkedList` has O(1) insert/remove *at a known node*, but finding the node is O(n), each element is a separate object, and iteration is slow. For queues and stacks use `ArrayDeque`.
+
+</QA>
+
+<QA q="HashSet vs LinkedHashSet vs TreeSet?" level="easy">
+
+`HashSet` (backed by a `HashMap`) has no order, O(1). `LinkedHashSet` keeps **insertion order**. `TreeSet` keeps elements **sorted** (red-black tree, O(log n)) with navigation methods like `floor` and `ceiling`. `TreeSet` uses `compareTo`, not `equals`, to detect duplicates.
+
+</QA>
+
+<QA q="What is a fail-fast iterator? How do you remove elements while iterating?" level="medium">
+
+Fail-fast iterators track a `modCount`; if the collection is structurally modified outside the iterator, the next `next()` throws `ConcurrentModificationException` — a best-effort bug detector, not a thread-safety guarantee.
+
+Remove safely with `iterator.remove()` or `collection.removeIf(predicate)`. Concurrent collections have weakly consistent iterators that never throw CME.
+
+</QA>
+
+<QA q="How would you implement an LRU cache in Java?" level="medium">
+
+Extend `LinkedHashMap` with **access order** and override `removeEldestEntry`:
+
+```java
+class Lru<K, V> extends LinkedHashMap<K, V> {
+    private final int max;
+    Lru(int max) { super(16, 0.75f, true); this.max = max; }
+    @Override protected boolean removeEldestEntry(Map.Entry<K, V> e) { return size() > max; }
+}
+```
+
+In production prefer **Caffeine** (W-TinyLFU eviction, TTLs, stats). In a whiteboard round you may be asked for a HashMap + doubly linked list with O(1) get/put.
+
+</QA>
+
+<QA q="List.of vs Arrays.asList vs Collections.unmodifiableList?" level="medium">
+
+- `List.of(...)` — truly **immutable**, rejects nulls.
+- `Arrays.asList(array)` — **fixed-size** view: `set` writes through to the array, `add`/`remove` throw.
+- `Collections.unmodifiableList(list)` — read-only **view**: changes to the underlying list show through.
+- `List.copyOf(c)` — independent immutable **copy**.
+
+</QA>
+
+<QA q="What are Sequenced Collections (Java 21)?" level="easy">
+
+`SequencedCollection`, `SequencedSet` and `SequencedMap` give ordered collections a uniform API: `getFirst()`, `getLast()`, `addFirst()`, `addLast()`, `removeFirst()`, `removeLast()` and a live `reversed()` view — implemented by `List`, `Deque`, `LinkedHashSet`, `SortedSet`, `LinkedHashMap` and `SortedMap`.
+
+</QA>
+
+<QA q="When would you use a PriorityQueue? What is its complexity?" level="medium">
+
+For repeatedly taking the smallest (or largest) element: scheduling, Dijkstra, merging sorted streams, **top-K**. It's a binary heap: `offer`/`poll` O(log n), `peek` O(1), `contains` O(n). Iteration order is **not** sorted. For top-K largest, keep a min-heap of size K — O(n log K).
+
+</QA>
+
+<QA q="Why is EnumMap faster than HashMap for enum keys?" level="medium">
+
+`EnumMap` is backed by an **array indexed by `ordinal()`** — no hashing, no collisions, no node objects, iteration in declaration order. `EnumSet` is a **bit vector**, so set operations are single CPU instructions.
+
+</QA>
+
+<QA q="What is the time complexity of common operations on TreeMap?" level="easy">
+
+`get`, `put`, `remove`, `containsKey`, `firstKey`, `floorKey`, `ceilingKey` are **O(log n)** (red-black tree). Iteration is O(n) in key order. Range views (`headMap`, `tailMap`, `subMap`) are live views.
+
+</QA>

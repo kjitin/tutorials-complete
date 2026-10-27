@@ -1,0 +1,533 @@
+---
+import { getCollection } from 'astro:content';
+import { Code } from 'astro:components';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/Icon.astro';
+import Playground from '../components/mdx/Playground.astro';
+import { TRACKS } from '../site.config';
+import { getLessons, groupLessons, lessonUrl } from '../lib/lessons';
+import { countQuestions } from '../lib/inline';
+import { QUIZZES } from '../data/quizzes';
+
+const tracks = await Promise.all(
+  TRACKS.map(async (t) => {
+    const lessons = await getLessons(t.id);
+    return { ...t, lessons, groups: groupLessons(t.id, lessons) };
+  }),
+);
+const lessonCount = tracks.reduce((s, t) => s + t.lessons.length, 0);
+const interview = await getCollection('interview');
+const interviewCount = interview.reduce((s, t) => s + countQuestions(t.body), 0);
+const quizCount = QUIZZES.reduce((s, q) => s + q.questions.length, 0);
+const patterns = tracks.find((t) => t.id === 'design-patterns')!;
+const gofGroups = patterns.groups.filter((g) => g.group !== 'Principles');
+const gofCount = gofGroups.reduce((s, g) => s + g.lessons.length, 0);
+
+const demo = `import java.util.*;
+import java.util.stream.*;
+
+sealed interface Shape permits Circle, Square {}
+record Circle(double r) implements Shape {}
+record Square(double side) implements Shape {}
+
+class Main {
+    static double area(Shape s) {
+        return switch (s) {
+            case Circle c -> Math.PI * c.r() * c.r();
+            case Square q -> q.side() * q.side();
+        };
+    }
+
+    public static void main(String[] args) {
+        List<Shape> shapes = List.of(new Circle(1), new Square(3), new Circle(2.5));
+        Map<String, Double> total = shapes.stream()
+            .collect(Collectors.groupingBy(
+                s -> s.getClass().getSimpleName(),
+                TreeMap::new,
+                Collectors.summingDouble(Main::area)));
+        total.forEach((k, v) -> System.out.printf("%-7s %.2f%n", k, v));
+    }
+}`;
+
+const features = [
+  { icon: 'play', title: 'Run Java in the browser', text: 'Every example compiles on a real Java 21 JDK. Edit the code, hit Run, see the output — no setup.' },
+  { icon: 'diagram', title: 'UML for every pattern', text: 'Class and sequence diagrams that redraw for light and dark mode, right next to the code.' },
+  { icon: 'briefcase', title: `${interviewCount}+ interview questions`, text: 'Detailed answers with code, common follow-ups and the traps interviewers set. Mark what you know.' },
+  { icon: 'quiz', title: `${quizCount} quiz questions`, text: 'Shuffled multiple-choice quizzes with explanations for every answer and saved best scores.' },
+  { icon: 'chart', title: 'Track your progress', text: 'Mark lessons complete, bookmark pages and pick up exactly where you left off.' },
+  { icon: 'search', title: 'Instant search', text: 'Press ⌘K anywhere to search every lesson, pattern and interview answer.' },
+];
+---
+
+<BaseLayout>
+  <section class="hero bg-grid">
+    <div class="glow g1"></div>
+    <div class="glow g2"></div>
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <span class="pill"><span class="dot"></span> Java 21 · Spring Boot 4 · All 23 GoF patterns</span>
+        <h1>
+          Master Java backend engineering<span class="gradient-text"> with code you can run.</span>
+        </h1>
+        <p class="sub">
+          Structured lessons on modern Java, Spring Boot and design patterns — every concept backed by a runnable example,
+          a diagram and the interview questions you'll actually be asked.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="/java/">Start learning <Icon name="arrow-right" size={15} /></a>
+          <a class="btn" href="/interview/"><Icon name="briefcase" size={15} /> Interview prep</a>
+        </div>
+        <dl class="stats">
+          <div><dt>{lessonCount}</dt><dd>lessons</dd></div>
+          <div><dt>{gofCount}</dt><dd>GoF patterns</dd></div>
+          <div><dt>{interviewCount}</dt><dd>interview Q&amp;As</dd></div>
+          <div><dt>{quizCount}</dt><dd>quiz questions</dd></div>
+        </dl>
+      </div>
+      <div class="hero-demo">
+        <Playground title="Shapes.java">
+          <Code code={demo} lang="java" themes={{ light: 'github-light', dark: 'github-dark-dimmed' }} defaultColor={false} />
+        </Playground>
+        <p class="demo-hint"><Icon name="zap" size={13} /> This is live — press <b>Run</b> or <b>Edit</b> the code.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="container resume" data-resume hidden>
+    <div class="card resume-card">
+      <Icon name="sparkles" size={18} />
+      <span>Welcome back! Continue with <a data-resume-link href="/"></a></span>
+      <a class="btn btn-sm" href="/progress/">View progress</a>
+    </div>
+  </section>
+
+  <section class="container block">
+    <span class="eyebrow">Learning paths</span>
+    <h2 class="section-title">Three tracks. One coherent path.</h2>
+    <p class="section-sub">Go from language fundamentals to production Spring services and the architecture vocabulary senior engineers use.</p>
+    <div class="tracks">
+      {
+        tracks.map((t) => (
+          <a class="track card" href={`/${t.id}/`} style={`--accent:${t.accent}`}>
+            <span class="t-icon">
+              <Icon name={t.icon} size={22} />
+            </span>
+            <span class="t-title">{t.title}</span>
+            <span class="t-desc">{t.description}</span>
+            <span class="t-mods">
+              {t.groups.map((g) => (
+                <span class="chip">{g.group}</span>
+              ))}
+            </span>
+            <span class="t-foot">
+              <span>
+                {t.lessons.length} lessons · {t.groups.length} modules
+              </span>
+              <Icon name="arrow-right" size={16} />
+            </span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="container block">
+    <span class="eyebrow">Why it works</span>
+    <h2 class="section-title">Built for learning by doing.</h2>
+    <div class="features">
+      {
+        features.map((f) => (
+          <div class="feature">
+            <span class="f-icon">
+              <Icon name={f.icon} size={18} />
+            </span>
+            <h3>{f.title}</h3>
+            <p>{f.text}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="container block">
+    <span class="eyebrow">Pattern catalogue</span>
+    <h2 class="section-title">All {gofCount} Gang of Four patterns.</h2>
+    <p class="section-sub">Each with intent, UML, a runnable example, real-world usage in the JDK and Spring, and interview notes.</p>
+    <div class="catalog">
+      {
+        gofGroups.map((g) => (
+          <div class="cat-col card">
+            <h3>
+              {g.group} <span>{g.lessons.length}</span>
+            </h3>
+            <div class="cat-list">
+              {g.lessons.map((l) => (
+                <a href={lessonUrl('design-patterns', l.id)}>{l.data.title.replace(/ Pattern$/, '')}</a>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="container block">
+    <div class="cta-band">
+      <div>
+        <h2>Interview in two weeks?</h2>
+        <p>Work through the Q&amp;A, take the quizzes and use “I know this” to focus only on the gaps.</p>
+      </div>
+      <div class="cta">
+        <a class="btn btn-primary" href="/interview/">Browse questions <Icon name="arrow-right" size={15} /></a>
+        <a class="btn" href="/quiz/">Take a quiz</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<script>
+  import { progress } from '../scripts/progress';
+  // Offer to resume from the most recent bookmark, if any
+  const last = progress.bookmarks()[0];
+  if (last) {
+    const box = document.querySelector<HTMLElement>('[data-resume]')!;
+    const link = box.querySelector<HTMLAnchorElement>('[data-resume-link]')!;
+    link.href = last.url;
+    link.textContent = last.title;
+    box.hidden = false;
+  }
+</script>
+
+<style>
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 72px 0 80px;
+    border-bottom: 1px solid var(--border);
+  }
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  .g1 {
+    width: 520px;
+    height: 520px;
+    top: -220px;
+    left: -140px;
+    background: #f97316;
+    opacity: 0.22;
+  }
+  .g2 {
+    width: 600px;
+    height: 600px;
+    top: -160px;
+    right: -200px;
+    background: #8b5cf6;
+    opacity: 0.25;
+  }
+  :global([data-theme='light']) .glow {
+    opacity: 0.12;
+  }
+  .hero-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: 48px;
+    align-items: center;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 99px;
+    border: 1px solid var(--border-strong);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    font-size: 13px;
+    color: var(--text-soft);
+    margin-bottom: 22px;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent);
+  }
+  h1 {
+    font-size: clamp(36px, 5.6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.04em;
+    margin: 0 0 22px;
+    font-weight: 800;
+  }
+  .sub {
+    font-size: 18.5px;
+    color: var(--text-soft);
+    max-width: 560px;
+    margin: 0 0 30px;
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .cta .btn {
+    padding: 12px 20px;
+    font-size: 15px;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    margin: 40px 0 0;
+  }
+  .stats div {
+    display: flex;
+    flex-direction: column;
+  }
+  .stats dt {
+    font-size: 28px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+  }
+  .stats dd {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+  .hero-demo {
+    min-width: 0;
+  }
+  .hero-demo :global(.playground) {
+    margin: 0;
+    box-shadow: 0 30px 80px -30px rgba(139, 92, 246, 0.45), var(--glow);
+  }
+  .hero-demo :global(pre.astro-code) {
+    font-size: 12.5px;
+    max-height: 420px;
+  }
+  .demo-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 12px 4px 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .resume {
+    margin-top: 28px;
+  }
+  .resume-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    color: var(--text-soft);
+  }
+  .resume-card :global(svg) {
+    color: var(--brand);
+    flex-shrink: 0;
+  }
+  .resume-card a[data-resume-link] {
+    color: var(--brand);
+    font-weight: 600;
+  }
+  .resume-card .btn {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .block {
+    margin-top: 96px;
+  }
+  .tracks {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-top: 32px;
+  }
+  .track {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 26px;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .track::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 3px;
+    background: var(--accent);
+    opacity: 0.8;
+  }
+  .track:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .t-icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .t-title {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .t-desc {
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+  .t-mods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1;
+    align-content: flex-start;
+  }
+  .t-mods .chip {
+    font-size: 11.5px;
+  }
+  .t-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 13.5px;
+    font-weight: 550;
+    color: var(--accent);
+  }
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    margin-top: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--border);
+  }
+  .feature {
+    padding: 26px;
+    background: var(--surface);
+  }
+  .f-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    color: #fff;
+    background: var(--gradient);
+    margin-bottom: 14px;
+  }
+  .feature h3 {
+    margin: 0 0 6px;
+    font-size: 16.5px;
+  }
+  .feature p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+  .catalog {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-top: 32px;
+  }
+  .cat-col {
+    padding: 22px;
+  }
+  .cat-col h3 {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 14px;
+    font-size: 16px;
+  }
+  .cat-col h3 span {
+    color: #a855f7;
+    font-family: var(--font-mono);
+  }
+  .cat-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .cat-list a {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 13.5px;
+    color: var(--text-soft);
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .cat-list a:hover {
+    border-color: #a855f7;
+    color: var(--text);
+  }
+  .cta-band {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 24px;
+    padding: 40px;
+    border-radius: 20px;
+    border: 1px solid var(--border-strong);
+    background:
+      radial-gradient(600px 200px at 0% 0%, color-mix(in srgb, #f97316 18%, transparent), transparent),
+      radial-gradient(600px 240px at 100% 100%, color-mix(in srgb, #8b5cf6 22%, transparent), transparent), var(--surface);
+  }
+  .cta-band h2 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    letter-spacing: -0.02em;
+  }
+  .cta-band p {
+    margin: 0;
+    color: var(--text-soft);
+  }
+  @media (max-width: 1000px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+    }
+    .tracks,
+    .features,
+    .catalog {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (min-width: 640px) and (max-width: 1000px) {
+    .features {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  @media (max-width: 640px) {
+    .hero {
+      padding: 44px 0 56px;
+    }
+    .stats {
+      gap: 20px;
+    }
+    .cta-band {
+      padding: 26px;
+    }
+    .block {
+      margin-top: 72px;
+    }
+  }
+</style>

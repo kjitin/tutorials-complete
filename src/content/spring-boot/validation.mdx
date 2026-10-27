@@ -1,0 +1,160 @@
+---
+title: Bean Validation
+description: Jakarta Validation constraints on records, nested and collection validation, groups, custom constraints and method-level validation.
+group: Web & REST
+order: 2
+level: beginner
+tags: [validation, rest]
+---
+
+## Setup
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-validation</artifactId>
+</dependency>
+```
+
+This brings **Hibernate Validator**, the reference implementation of **Jakarta Validation 3.1** (part of Jakarta EE 11 in Spring Boot 4).
+
+## Constraints on request DTOs
+
+```java
+public record RegisterUserRequest(
+        @NotBlank @Size(max = 100) String name,
+        @NotBlank @Email String email,
+        @NotNull @Past LocalDate dateOfBirth,
+        @NotBlank @Size(min = 12, message = "must be at least {min} characters") String password,
+        @Pattern(regexp = "^\\+?[0-9 ]{7,15}$") String phone,              // optional: null is valid
+        @Valid @NotNull AddressRequest address,                             // cascade into nested object
+        @Size(max = 5) List<@NotBlank @Size(max = 30) String> interests) {} // validate elements too
+
+public record AddressRequest(@NotBlank String line1, @NotBlank String city,
+                             @NotBlank @Size(min = 2, max = 2) String country) {}
+```
+
+Trigger validation with `@Valid` (or `@Validated`) on the parameter:
+
+```java
+@PostMapping("/api/users")
+ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterUserRequest request) { ... }
+```
+
+If validation fails, Spring MVC throws `MethodArgumentNotValidException`, which Boot turns into a **400 Bad Request** — see [Error Handling](/spring-boot/error-handling/) to return a clean `ProblemDetail` with field errors.
+
+## Common constraints
+
+| Constraint | Checks | Note |
+| --- | --- | --- |
+| `@NotNull` | not null | |
+| `@NotEmpty` | not null and size/length > 0 | strings, collections, maps, arrays |
+| `@NotBlank` | not null and contains a non-whitespace char | strings only |
+| `@Size(min, max)` | length / size range | |
+| `@Min`, `@Max`, `@Positive`, `@PositiveOrZero`, `@DecimalMin` | numeric bounds | |
+| `@Email`, `@Pattern(regexp)` | format | |
+| `@Past`, `@Future`, `@PastOrPresent` | temporal | |
+| `@Digits(integer, fraction)` | precision of `BigDecimal` | money |
+
+<Callout type="tip">
+Most constraints treat **`null` as valid**, so they compose: `@Email` alone allows a missing email; `@NotBlank @Email` requires one. This is intentional — combine `@NotNull`/`@NotBlank` with format constraints.
+</Callout>
+
+## Validating path and query parameters
+
+Constraints on simple parameters work directly in controllers (method validation is built into Spring MVC since Framework 6.1):
+
+```java
+@GetMapping("/api/products")
+List<ProductResponse> search(@RequestParam @Size(min = 2) String q,
+                             @RequestParam(defaultValue = "20") @Max(100) int limit) { ... }
+
+@GetMapping("/api/products/{sku}")
+ProductResponse get(@PathVariable @Pattern(regexp = "[A-Z]{3}-\\d{4}") String sku) { ... }
+```
+
+Violations raise `HandlerMethodValidationException` (also mapped to 400).
+
+## Validation in the service layer
+
+Annotate a bean with `@Validated` and Spring validates method parameters and return values through a proxy:
+
+```java
+@Service
+@Validated
+class TransferService {
+    public Receipt transfer(@NotBlank String from, @NotBlank String to, @Positive BigDecimal amount) { ... }
+}
+```
+
+This throws `ConstraintViolationException`. Useful for messages consumed from Kafka or other non-HTTP entry points.
+
+## Validation groups
+
+Different rules for different operations, e.g. `id` must be null on create but present on update:
+
+```java
+public interface OnCreate {}
+public interface OnUpdate {}
+
+public record ProductRequest(
+        @Null(groups = OnCreate.class) @NotNull(groups = OnUpdate.class) Long id,
+        @NotBlank(groups = {OnCreate.class, OnUpdate.class}) String name) {}
+
+@PostMapping  ProductResponse create(@Validated(OnCreate.class) @RequestBody ProductRequest r) { ... }
+@PutMapping   ProductResponse update(@Validated(OnUpdate.class) @RequestBody ProductRequest r) { ... }
+```
+
+Often simpler: use **separate request records** for create and update.
+
+## Custom constraints
+
+### Single field
+
+```java
+@Target({FIELD, PARAMETER, RECORD_COMPONENT, TYPE_USE})
+@Retention(RUNTIME)
+@Constraint(validatedBy = IsoCurrencyValidator.class)
+public @interface IsoCurrency {
+    String message() default "must be a supported ISO-4217 currency";
+    Class<?>[] groups() default {};
+    Class<? extends Payload>[] payload() default {};
+}
+
+public class IsoCurrencyValidator implements ConstraintValidator<IsoCurrency, String> {
+    private static final Set<String> SUPPORTED = Set.of("GBP", "EUR", "USD");
+    @Override public boolean isValid(String value, ConstraintValidatorContext ctx) {
+        return value == null || SUPPORTED.contains(value);     // null handled by @NotNull
+    }
+}
+```
+
+### Cross-field (class-level)
+
+```java
+@DateRangeValid
+public record BookingRequest(@NotNull LocalDate checkIn, @NotNull LocalDate checkOut) {}
+
+public class DateRangeValidator implements ConstraintValidator<DateRangeValid, BookingRequest> {
+    @Override public boolean isValid(BookingRequest b, ConstraintValidatorContext ctx) {
+        if (b.checkIn() == null || b.checkOut() == null) return true;
+        boolean ok = b.checkOut().isAfter(b.checkIn());
+        if (!ok) {
+            ctx.disableDefaultConstraintViolation();
+            ctx.buildConstraintViolationWithTemplate("must be after checkIn")
+               .addPropertyNode("checkOut").addConstraintViolation();
+        }
+        return ok;
+    }
+}
+```
+
+Validators are Spring beans, so they can inject repositories — e.g. to check that an email isn't already registered (though uniqueness is ultimately enforced by a database constraint).
+
+<Callout type="warn" title="Validation is not your only defence">
+Bean Validation checks **input shape**. Business invariants (stock levels, account balance, uniqueness under concurrency) belong in the domain/service layer and the database (unique indexes, foreign keys, check constraints).
+</Callout>
+
+<Callout type="interview">
+*“`@NotNull` vs `@NotEmpty` vs `@NotBlank`?”*, *“`@Valid` vs `@Validated`?”* (`@Valid` is standard Jakarta and triggers cascading; `@Validated` is Spring's variant that supports groups and enables method validation on beans), *“How do you validate nested objects and list elements?”* (`@Valid` on the field; type-use constraints like `List<@NotBlank String>`), and *“How do you write a cross-field validator?”*.
+</Callout>

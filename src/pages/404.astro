@@ -1,0 +1,54 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Page not found">
+  <div class="container nf">
+    <pre class="code">Exception in thread "main"
+java.lang.<span>PageNotFoundException</span>: 404
+    at Router.resolve(Router.java:404)</pre>
+    <h1>This page doesn't exist.</h1>
+    <p>It may have moved. Try searching, or head back to a learning path.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="/">Go home</a>
+      <button class="btn" data-search-open>Search the site</button>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .nf {
+    max-width: 640px;
+    padding-top: 96px;
+    text-align: center;
+  }
+  .code {
+    display: inline-block;
+    text-align: left;
+    padding: 16px 20px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--code-bg);
+    color: var(--muted);
+    font: 13px/1.7 var(--font-mono);
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .code span {
+    color: var(--err);
+  }
+  h1 {
+    font-size: 36px;
+    letter-spacing: -0.03em;
+    margin: 28px 0 8px;
+  }
+  p {
+    color: var(--muted);
+  }
+  .cta {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 24px;
+  }
+</style>

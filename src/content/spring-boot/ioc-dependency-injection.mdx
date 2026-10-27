@@ -1,0 +1,206 @@
+---
+title: IoC & Dependency Injection
+description: The IoC container, constructor vs field injection, stereotypes, @Bean, qualifiers, @Primary, and injecting collections of beans.
+group: Core Concepts
+order: 2
+level: beginner
+tags: [spring-core, di, ioc]
+---
+
+## Inversion of Control
+
+In plain Java, objects create their own dependencies:
+
+```java
+class OrderService {
+    private final PaymentGateway gateway = new StripeGateway("sk_live_...");   // hard-wired
+}
+```
+
+That makes `OrderService` impossible to test without Stripe and impossible to reconfigure without editing code. With **Inversion of Control (IoC)**, objects declare *what* they need, and a container supplies it. **Dependency Injection (DI)** is how the container hands those dependencies over — usually through the constructor.
+
+```java
+@Service
+class OrderService {
+    private final PaymentGateway gateway;
+    OrderService(PaymentGateway gateway) { this.gateway = gateway; }   // injected
+}
+```
+
+## See the idea without Spring
+
+Spring's container does much more, but the core idea fits in a few dozen lines: register types, then build objects by resolving their constructor parameters recursively.
+
+<Playground title="MiniContainer.java">
+
+```java
+import java.lang.reflect.*;
+import java.util.*;
+
+interface PaymentGateway { String charge(double amount); }
+class FakeGateway implements PaymentGateway {
+    public String charge(double amount) { return "fake-receipt-" + (int) amount; }
+}
+class AuditLog { void record(String e) { System.out.println("  audit: " + e); } }
+
+class OrderService {
+    private final PaymentGateway gateway;
+    private final AuditLog audit;
+    OrderService(PaymentGateway gateway, AuditLog audit) { this.gateway = gateway; this.audit = audit; }
+    void checkout(double total) { audit.record("charged " + gateway.charge(total)); }
+}
+
+// A toy IoC container: singleton scope + constructor injection
+class Container {
+    private final Map<Class<?>, Class<?>> bindings = new HashMap<>();
+    private final Map<Class<?>, Object> singletons = new HashMap<>();
+
+    <T> void bind(Class<T> type, Class<? extends T> impl) { bindings.put(type, impl); }
+
+    @SuppressWarnings("unchecked")
+    <T> T get(Class<T> type) {
+        Object existing = singletons.get(type);
+        if (existing != null) return (T) existing;
+        Class<?> impl = bindings.getOrDefault(type, type);
+        try {
+            Constructor<?> ctor = impl.getDeclaredConstructors()[0];
+            Object[] args = Arrays.stream(ctor.getParameterTypes()).map(this::get).toArray();   // resolve deps recursively
+            System.out.println("creating " + impl.getSimpleName() + " with " + Arrays.toString(ctor.getParameterTypes()));
+            ctor.setAccessible(true);
+            T instance = (T) ctor.newInstance(args);
+            singletons.put(type, instance);
+            return instance;
+        } catch (ReflectiveOperationException e) { throw new IllegalStateException(e); }
+    }
+}
+
+class Main {
+    public static void main(String[] args) {
+        var container = new Container();
+        container.bind(PaymentGateway.class, FakeGateway.class);    // swap for a real gateway in "prod"
+
+        OrderService service = container.get(OrderService.class);
+        service.checkout(59.0);
+        System.out.println("singleton? " + (service == container.get(OrderService.class)));
+    }
+}
+```
+
+</Playground>
+
+Spring adds scopes, lifecycle callbacks, proxies, configuration, conditional registration and much more — but the principle is the same.
+
+## Declaring beans
+
+**1. Stereotype annotations + component scanning**
+
+| Annotation | Meaning |
+| --- | --- |
+| `@Component` | Generic Spring-managed component |
+| `@Service` | Business/service layer (semantic only) |
+| `@Repository` | Data access — also enables exception translation to `DataAccessException` |
+| `@Controller` / `@RestController` | Web layer |
+| `@Configuration` | Class containing `@Bean` methods |
+
+**2. `@Bean` methods** — for third-party classes you can't annotate, or when construction needs logic:
+
+```java
+@Configuration(proxyBeanMethods = false)
+class ClientsConfig {
+    @Bean
+    RestClient paymentsClient(RestClient.Builder builder, PaymentProperties props) {
+        return builder.baseUrl(props.baseUrl().toString()).build();
+    }
+
+    @Bean
+    Clock clock() { return Clock.systemUTC(); }
+}
+```
+
+## Injection styles
+
+<CodeTabs labels={["Constructor (recommended)", "Field", "Setter"]}>
+
+```java
+@Service
+class InvoiceService {
+    private final InvoiceRepository repository;
+    private final Clock clock;
+
+    // Single constructor: @Autowired is optional
+    InvoiceService(InvoiceRepository repository, Clock clock) {
+        this.repository = repository;
+        this.clock = clock;
+    }
+}
+```
+
+```java
+@Service
+class InvoiceService {
+    @Autowired private InvoiceRepository repository;   // hidden dependency, not final,
+    @Autowired private Clock clock;                    // needs reflection to set in tests
+}
+```
+
+```java
+@Service
+class InvoiceService {
+    private Clock clock = Clock.systemUTC();
+
+    @Autowired(required = false)                       // for optional dependencies
+    void setClock(Clock clock) { this.clock = clock; }
+}
+```
+
+</CodeTabs>
+
+Why constructor injection wins:
+
+- Dependencies are **explicit** and fields can be **`final`** (immutable, thread-safe)
+- The object is **never half-initialised**
+- Tests just call the constructor — no Spring needed
+- A constructor with ten parameters is a visible smell that the class does too much
+- Circular dependencies fail fast at startup instead of hiding
+
+## Resolving ambiguity
+
+If two beans implement `PaymentGateway`, injection by type fails with `NoUniqueBeanDefinitionException`. Options:
+
+```java
+@Component @Primary
+class StripeGateway implements PaymentGateway { }      // default choice
+
+@Component @Qualifier("paypal")
+class PaypalGateway implements PaymentGateway { }
+
+@Service
+class RefundService {
+    RefundService(@Qualifier("paypal") PaymentGateway gateway) { }   // explicit choice
+}
+```
+
+## Injecting all implementations
+
+Ask for a `List` or `Map` and Spring injects **every** matching bean — the foundation of plugin-style designs and the Strategy pattern:
+
+```java
+@Service
+class NotificationService {
+    private final Map<String, NotificationChannel> channels;   // key = bean name
+
+    NotificationService(Map<String, NotificationChannel> channels) { this.channels = channels; }
+
+    void send(String channel, String message) { channels.get(channel).send(message); }
+}
+```
+
+`ObjectProvider<T>` gives lazy or optional access: `provider.getIfAvailable()`, `provider.orderedStream()`.
+
+<Callout type="tip" title="Null safety in Spring Framework 7">
+Framework 7 annotates its APIs with **JSpecify**. Add `@NullMarked` to your packages (in `package-info.java`) and mark exceptions with `@Nullable`, and tools such as IntelliJ IDEA and NullAway can flag possible null dereferences at build time, including on Spring APIs.
+</Callout>
+
+<Callout type="interview">
+*“What is IoC / DI?”*, *“Why prefer constructor injection?”*, *“How do you resolve two beans of the same type?”* (`@Primary`, `@Qualifier`, inject a collection, or name-based matching), *“`@Component` vs `@Bean`?”* (annotate your own class and let scanning find it vs a factory method, typically for third-party types), *“What does `@Repository` add over `@Component`?”* (persistence exception translation).
+</Callout>

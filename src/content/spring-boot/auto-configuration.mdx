@@ -1,0 +1,147 @@
+---
+title: How Auto-Configuration Works
+description: Conditional annotations, the AutoConfiguration.imports file, backing off for user beans, the conditions report and writing your own starter.
+group: Core Concepts
+order: 4
+level: intermediate
+tags: [spring-boot, auto-configuration, internals]
+---
+
+## The idea
+
+Add `spring-boot-starter-data-jpa` and an H2 driver to the classpath, and Boot gives you a `DataSource`, an `EntityManagerFactory`, a `JpaTransactionManager` and Spring Data repositories — without a single line of configuration. That's **auto-configuration**: `@Configuration` classes that Boot applies **conditionally**, based on what it finds on the classpath, in the environment and in your own bean definitions.
+
+## Where auto-configurations come from
+
+Each module lists its auto-configuration classes in a file:
+
+```text
+META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+```
+
+`@EnableAutoConfiguration` (inside `@SpringBootApplication`) loads all of them. In Spring Boot 4, auto-configuration is **modular**: each technology (web MVC, JDBC, Kafka, …) ships its own module and auto-configurations, and starters bring in just the modules you need — smaller classpaths and fewer conditions to evaluate.
+
+## Conditions
+
+An auto-configuration is a regular configuration class guarded by `@Conditional…` annotations:
+
+```java
+@AutoConfiguration(after = DataSourceAutoConfiguration.class)
+@ConditionalOnClass(JdbcTemplate.class)                     // only if spring-jdbc is on the classpath
+@ConditionalOnSingleCandidate(DataSource.class)             // and exactly one DataSource exists
+@EnableConfigurationProperties(JdbcProperties.class)
+public class JdbcTemplateAutoConfiguration {
+
+    @Bean
+    @ConditionalOnMissingBean(JdbcOperations.class)         // back off if the user defined one
+    JdbcTemplate jdbcTemplate(DataSource dataSource, JdbcProperties properties) {
+        JdbcTemplate template = new JdbcTemplate(dataSource);
+        template.setFetchSize(properties.getTemplate().getFetchSize());
+        return template;
+    }
+}
+```
+
+| Condition | Matches when… |
+| --- | --- |
+| `@ConditionalOnClass` / `@ConditionalOnMissingClass` | A class is (not) on the classpath |
+| `@ConditionalOnBean` / `@ConditionalOnMissingBean` | A bean of a type/name does (not) exist |
+| `@ConditionalOnProperty` | A property has a given value (`havingValue`, `matchIfMissing`) |
+| `@ConditionalOnWebApplication` | Running as a servlet or reactive web app |
+| `@ConditionalOnResource` | A resource exists |
+| `@ConditionalOnSingleCandidate` | Exactly one bean (or one primary) of a type |
+| `@ConditionalOnExpression` | A SpEL expression is true |
+| `@ConditionalOnThreading` | Virtual or platform threads are active |
+
+## The golden rule: your beans win
+
+Auto-configured beans use `@ConditionalOnMissingBean`. If **you** define a bean of that type, Boot **backs off**:
+
+```java
+@Bean
+JdbcTemplate jdbcTemplate(DataSource ds) {
+    var t = new JdbcTemplate(ds);
+    t.setQueryTimeout(5);
+    return t;                // Boot's JdbcTemplateAutoConfiguration now skips its own
+}
+```
+
+This is why the common customisation path is: **properties first** (`spring.jdbc.template.query-timeout=5s`), then **customizer beans** (`RestClientCustomizer`, `Jackson…Customizer`, `TomcatConnectorCustomizer`), and only then replacing the bean entirely.
+
+## Debugging: the conditions report
+
+Why did (or didn't) something get configured?
+
+```bash
+java -jar app.jar --debug
+```
+
+prints the **Conditions Evaluation Report**:
+
+```text
+Positive matches:
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.core.JdbcTemplate'
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource) found a single bean 'dataSource'
+
+Negative matches:
+   MongoAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.mongodb.client.MongoClient'
+```
+
+The same data is available live at **`/actuator/conditions`**.
+
+Exclude an auto-configuration you don't want:
+
+```java
+@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
+```
+
+```properties
+spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+```
+
+## Write your own starter
+
+A company-internal starter packages shared configuration (an audit client, standard security, logging conventions). Two modules by convention: `acme-audit-spring-boot-autoconfigure` and `acme-audit-spring-boot-starter`.
+
+```java
+@ConfigurationProperties("acme.audit")
+public record AuditProperties(URI endpoint, boolean enabled, Duration timeout) {
+    public AuditProperties {
+        if (timeout == null) timeout = Duration.ofSeconds(2);
+    }
+}
+
+@AutoConfiguration
+@ConditionalOnClass(AuditClient.class)
+@ConditionalOnProperty(prefix = "acme.audit", name = "enabled", havingValue = "true", matchIfMissing = true)
+@EnableConfigurationProperties(AuditProperties.class)
+public class AuditAutoConfiguration {
+
+    @Bean
+    @ConditionalOnMissingBean
+    AuditClient auditClient(AuditProperties props, RestClient.Builder builder) {
+        return new AuditClient(builder.baseUrl(props.endpoint().toString()).build(), props.timeout());
+    }
+}
+```
+
+```text
+# src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+com.acme.audit.autoconfigure.AuditAutoConfiguration
+```
+
+Test it with `ApplicationContextRunner` — fast, no full application needed:
+
+```java
+new ApplicationContextRunner()
+    .withConfiguration(AutoConfigurations.of(AuditAutoConfiguration.class))
+    .withPropertyValues("acme.audit.endpoint=http://localhost:9000")
+    .run(ctx -> assertThat(ctx).hasSingleBean(AuditClient.class));
+```
+
+<Callout type="interview">
+*“How does Spring Boot auto-configuration work?”* — `@EnableAutoConfiguration` loads classes listed in `AutoConfiguration.imports`; each is a `@Configuration` guarded by `@Conditional` annotations (classpath, beans, properties); beans use `@ConditionalOnMissingBean` so user-defined beans take precedence. Mention `--debug` / `/actuator/conditions` for troubleshooting and how to exclude an auto-configuration.
+</Callout>

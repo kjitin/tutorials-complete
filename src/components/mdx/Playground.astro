@@ -1,0 +1,297 @@
+---
+import Icon from '../Icon.astro';
+import { SITE } from '../../site.config';
+
+interface Props {
+  title?: string;
+}
+const { title = 'Main.java' } = Astro.props;
+const { endpoint, compiler, timeoutMs } = SITE.playground;
+---
+
+<div class="playground" data-playground data-endpoint={endpoint} data-compiler={compiler} data-timeout={timeoutMs}>
+  <div class="pg-bar">
+    <span class="pg-title">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <Icon name="terminal" size={14} />
+      {title}
+      <span class="pg-badge">Java 21</span>
+    </span>
+    <span class="pg-actions">
+      <button type="button" class="pg-btn" data-reset hidden title="Restore the original code">
+        <Icon name="reset" size={14} /> Reset
+      </button>
+      <button type="button" class="pg-btn" data-edit title="Edit the code">
+        <Icon name="pencil" size={14} /> <span>Edit</span>
+      </button>
+      <button type="button" class="pg-btn pg-run" data-run title="Run (Ctrl/⌘ + Enter)">
+        <Icon name="play" size={13} /> <span>Run</span>
+      </button>
+    </span>
+  </div>
+  <div class="pg-code"><slot /></div>
+  <textarea class="pg-editor" hidden spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Java source"
+  ></textarea>
+  <div class="pg-output" hidden>
+    <div class="pg-out-head">
+      <span>Output</span>
+      <span class="pg-status"></span>
+    </div>
+    <pre class="pg-out" aria-live="polite"></pre>
+  </div>
+</div>
+
+<script>
+  // Wandbox-compatible runner. Java's single-file launcher rejects `public`
+  // top-level types in a file not named after them, so we strip that modifier.
+  const prepare = (src: string) =>
+    src.replace(/^public\s+(?=(?:(?:final|abstract|sealed|non-sealed|static)\s+)*(?:class|interface|record|enum)\b)/gm, '');
+
+  document.querySelectorAll<HTMLElement>('[data-playground]').forEach((pg) => {
+    const pre = pg.querySelector<HTMLPreElement>('.pg-code pre')!;
+    const original = pre.innerText.replace(/\n$/, '');
+    const codeBox = pg.querySelector<HTMLElement>('.pg-code')!;
+    const editor = pg.querySelector<HTMLTextAreaElement>('.pg-editor')!;
+    const editBtn = pg.querySelector<HTMLButtonElement>('[data-edit]')!;
+    const resetBtn = pg.querySelector<HTMLButtonElement>('[data-reset]')!;
+    const runBtn = pg.querySelector<HTMLButtonElement>('[data-run]')!;
+    const output = pg.querySelector<HTMLElement>('.pg-output')!;
+    const out = pg.querySelector<HTMLPreElement>('.pg-out')!;
+    const status = pg.querySelector<HTMLElement>('.pg-status')!;
+    let editing = false;
+
+    const fit = () => {
+      editor.style.height = 'auto';
+      editor.style.height = editor.scrollHeight + 2 + 'px';
+    };
+
+    editBtn.addEventListener('click', () => {
+      editing = !editing;
+      if (editing) {
+        if (!editor.value) editor.value = original;
+        editor.hidden = false;
+        codeBox.hidden = true;
+        fit();
+        editor.focus();
+      } else {
+        editor.hidden = true;
+        codeBox.hidden = false;
+      }
+      editBtn.querySelector('span')!.textContent = editing ? 'View' : 'Edit';
+      resetBtn.hidden = !editor.value || editor.value === original;
+    });
+
+    resetBtn.addEventListener('click', () => {
+      editor.value = original;
+      resetBtn.hidden = true;
+      fit();
+    });
+
+    editor.addEventListener('input', () => {
+      fit();
+      resetBtn.hidden = editor.value === original;
+    });
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const { selectionStart: s, selectionEnd: end, value } = editor;
+        editor.value = value.slice(0, s) + '    ' + value.slice(end);
+        editor.selectionStart = editor.selectionEnd = s + 4;
+      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        runBtn.click();
+      }
+    });
+
+    runBtn.addEventListener('click', async () => {
+      const code = prepare(editor.value || original);
+      output.hidden = false;
+      out.className = 'pg-out';
+      out.textContent = 'Compiling and running…';
+      status.textContent = '';
+      runBtn.disabled = true;
+      const started = performance.now();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), Number(pg.dataset.timeout));
+      try {
+        const res = await fetch(pg.dataset.endpoint!, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ compiler: pg.dataset.compiler, code }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`Runner responded with HTTP ${res.status}`);
+        const r = await res.json();
+        const secs = ((performance.now() - started) / 1000).toFixed(1);
+        const compileErr = r.compiler_error || '';
+        const text = [compileErr, r.program_output, r.program_error].filter(Boolean).join('\n');
+        const ok = r.status === '0' && !r.signal;
+        out.textContent = text.trim() || '(no output)';
+        out.classList.add(ok ? 'ok' : 'err');
+        status.textContent = ok ? `✓ exit 0 · ${secs}s` : `✗ ${r.signal ? r.signal : 'exit ' + r.status} · ${secs}s`;
+      } catch (err) {
+        out.classList.add('err');
+        out.textContent =
+          (err as Error).name === 'AbortError'
+            ? 'Timed out waiting for the runner. Try again in a moment.'
+            : `Could not reach the code runner: ${(err as Error).message}`;
+      } finally {
+        clearTimeout(timer);
+        runBtn.disabled = false;
+      }
+    });
+  });
+</script>
+
+<style>
+  .playground {
+    margin: 1.5em 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--code-bg);
+    overflow: hidden;
+    box-shadow: var(--glow);
+  }
+  .pg-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .pg-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: 500 12.5px var(--font-mono);
+    color: var(--muted);
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dots {
+    display: flex;
+    gap: 5px;
+    margin-right: 4px;
+  }
+  .dots i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ef4444;
+    opacity: 0.8;
+  }
+  .dots i:nth-child(2) {
+    background: #f59e0b;
+  }
+  .dots i:nth-child(3) {
+    background: #22c55e;
+  }
+  .pg-badge {
+    font: 600 10.5px var(--font-sans);
+    padding: 2px 7px;
+    border-radius: 99px;
+    color: #f97316;
+    background: color-mix(in srgb, #f97316 14%, transparent);
+  }
+  .pg-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .pg-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-soft);
+    font: 550 12.5px var(--font-sans);
+    cursor: pointer;
+  }
+  .pg-btn:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .pg-btn[hidden] {
+    display: none;
+  }
+  .pg-run {
+    border: 0;
+    color: #fff;
+    background: linear-gradient(110deg, #16a34a, #22c55e);
+  }
+  .pg-run:hover {
+    color: #fff;
+    filter: brightness(1.1);
+  }
+  .pg-run:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+  .pg-code :global(pre.astro-code) {
+    border: 0;
+    border-radius: 0;
+  }
+  .pg-code[hidden] {
+    display: none;
+  }
+  .pg-editor {
+    display: block;
+    width: 100%;
+    min-height: 160px;
+    padding: 16px 18px;
+    border: 0;
+    outline: 0;
+    resize: vertical;
+    background: var(--code-bg);
+    color: var(--text);
+    font: 13.5px/1.7 var(--font-mono);
+    tab-size: 4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .pg-editor[hidden] {
+    display: none;
+  }
+  .pg-output {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .pg-output[hidden] {
+    display: none;
+  }
+  .pg-out-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 14px 0;
+    font: 600 11px var(--font-sans);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .pg-status {
+    letter-spacing: 0;
+    text-transform: none;
+    font-family: var(--font-mono);
+  }
+  .pg-out {
+    margin: 0;
+    padding: 8px 14px 14px;
+    max-height: 320px;
+    overflow: auto;
+    font: 13px/1.6 var(--font-mono);
+    color: var(--text-soft);
+    white-space: pre-wrap;
+  }
+  .pg-out:global(.ok) {
+    color: var(--text);
+  }
+  .pg-out:global(.err) {
+    color: #f87171;
+  }
+</style>

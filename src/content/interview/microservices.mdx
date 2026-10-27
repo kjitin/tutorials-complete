@@ -1,0 +1,134 @@
+---
+title: Microservices & Production
+description: Service boundaries, communication styles, resilience, Kafka, caching, observability, deployment and the distributed-systems questions senior roles expect.
+track: spring-boot
+order: 14
+---
+
+## Architecture
+
+<QA q="Monolith vs microservices — when would you choose each?" level="medium">
+
+Microservices buy **independent deployment and scaling**, team autonomy and fault isolation — at the cost of network calls, distributed data, eventual consistency, and much heavier operations (CI/CD, observability, platform). A well-structured **modular monolith** (e.g. with Spring Modulith) is often the better start; split out services when team size, scaling needs or release cadence demand it.
+
+</QA>
+
+<QA q="How do you define service boundaries?" level="hard">
+
+Around **business capabilities / bounded contexts** (Domain-Driven Design), not technical layers. Each service owns its data and can change without coordinating releases. Warning signs of bad boundaries: chatty synchronous calls between services, shared databases, and features that always require changing several services together (a "distributed monolith").
+
+</QA>
+
+<QA q="Why should each microservice own its database?" level="medium">
+
+A shared database couples services through the schema: one team's migration breaks another, and you can't scale or choose storage independently. With **database per service**, other services access data only through APIs or events. Cross-service queries then use API composition, replicated read models (CQRS) or events.
+
+</QA>
+
+<QA q="Synchronous REST vs asynchronous messaging between services?" level="medium">
+
+**REST/gRPC** is simple and gives immediate answers, but couples services in time — the callee must be up and fast. **Messaging** (Kafka, RabbitMQ) decouples availability and absorbs load spikes, enables fan-out to many consumers, but adds eventual consistency and harder debugging. Use sync for queries needing an immediate answer; events for notifying others that something happened.
+
+</QA>
+
+<QA q="What is an API gateway and what does it do?" level="easy">
+
+A single entry point in front of services (Spring Cloud Gateway, Kong, cloud gateways) handling **routing**, authentication/token relay, rate limiting, TLS termination, CORS, request aggregation and observability. A Backend-for-Frontend variant tailors APIs per client (web vs mobile).
+
+</QA>
+
+<QA q="How do you implement a business transaction across several services?" level="hard">
+
+There's no distributed ACID transaction in practice (2PC is fragile and slow). Use a **saga**: a sequence of local transactions, each publishing an event or command, with **compensating actions** to undo earlier steps on failure (cancel reservation, refund payment). Choreography (services react to each other's events) suits simple flows; orchestration (a central coordinator or workflow engine like Temporal/Camunda) suits complex ones.
+
+</QA>
+
+<QA q="What is the transactional outbox pattern?" level="hard">
+
+It solves the **dual write** problem — you can't atomically update the database and publish to Kafka. Write the event to an `outbox` table **in the same transaction** as the business change; a relay (poller, Debezium CDC, or Spring Modulith's event publication registry) publishes it afterwards and marks it sent. Delivery is at-least-once, so consumers must be idempotent.
+
+</QA>
+
+## Resilience
+
+<QA q="Explain the circuit breaker pattern." level="medium">
+
+A breaker tracks call outcomes to a dependency. **Closed**: calls flow, failures counted. When the failure (or slow-call) rate passes a threshold it goes **Open**: calls fail fast or use a fallback, giving the dependency time to recover. After a wait it's **Half-open**: a few trial calls decide whether to close again. Resilience4j implements it in Spring apps.
+
+</QA>
+
+<QA q="What rules apply to retries?" level="medium">
+
+Retry only **transient** failures (timeouts, 502/503/504), only **idempotent** operations (or POSTs with an idempotency key), with **exponential back-off and jitter**, a bounded number of attempts, and a total time below the caller's timeout. Retry at one layer to avoid multiplicative retry storms. Spring Framework 7 provides `@Retryable` in core.
+
+</QA>
+
+<QA q="How do you prevent cascading failures?" level="hard">
+
+Timeouts on every remote call, circuit breakers, bulkheads/concurrency limits (`@ConcurrencyLimit`) so one dependency can't take all resources, fallbacks and graceful degradation, load shedding and rate limiting, asynchronous messaging for non-critical paths, and readiness probes so unhealthy instances stop receiving traffic.
+
+</QA>
+
+<QA q="What is idempotency and how do you implement it for a POST endpoint?" level="medium">
+
+An idempotent operation has the same effect whether applied once or many times. For POST, accept an **`Idempotency-Key`** header; store the key with the result (unique constraint) in the same transaction as the operation, and on a repeat request return the stored result instead of executing again. Essential for payments and for any retried call.
+
+</QA>
+
+## Messaging, caching and data
+
+<QA q="How does Kafka guarantee ordering?" level="medium">
+
+Only **within a partition**. Records with the same **key** go to the same partition, so use the aggregate id (e.g. `orderId`) as the key to process all events for one entity in order. Within a consumer group, each partition is consumed by exactly one consumer at a time.
+
+</QA>
+
+<QA q="Kafka delivers at least once. How do you deal with duplicates?" level="medium">
+
+Make consumers **idempotent**: track processed event ids in a table (in the same transaction as the side effect), use upserts or natural idempotency ("set status to PAID"), and design events with unique ids. Producer-side idempotence (`enable.idempotence=true`) removes duplicates caused by producer retries but not consumer redelivery.
+
+</QA>
+
+<QA q="How do you handle a poison message?" level="medium">
+
+Retry a bounded number of times with back-off (non-blocking retry topics via `@RetryableTopic`), then send it to a **dead-letter topic** with the error details, alert, and provide a replay tool. Don't retry errors that can never succeed (validation failures) — route them to the DLT immediately.
+
+</QA>
+
+<QA q="Local cache vs distributed cache?" level="medium">
+
+A local cache (Caffeine) is nanosecond-fast with no network hop, but each instance has its own copy — stale and inconsistent across pods. A distributed cache (Redis) is shared and survives restarts, at the cost of a network round-trip, serialization and another system to operate. Hot, rarely changing data suits local caches; shared session-like or expensive data suits Redis — or combine both.
+
+</QA>
+
+<QA q="What is a cache stampede and how do you prevent it?" level="hard">
+
+When a hot key expires, many concurrent requests miss at once and all hit the database. Prevent with request coalescing (`@Cacheable(sync = true)` per instance, or a distributed lock), refresh-ahead (`refreshAfterWrite`), jittered TTLs so keys don't expire together, and serving slightly stale data while one request refreshes.
+
+</QA>
+
+## Operations
+
+<QA q="How do you trace a request across microservices?" level="medium">
+
+**Distributed tracing**: each request gets a trace id propagated through W3C `traceparent` headers (and Kafka record headers); each hop creates spans. In Spring Boot 4, Micrometer Observation plus OpenTelemetry instruments HTTP, JDBC and messaging automatically and exports via OTLP to Tempo, Jaeger or a vendor. Include trace ids in structured logs to correlate.
+
+</QA>
+
+<QA q="Liveness vs readiness probes?" level="easy">
+
+**Liveness** — is the process healthy, or should Kubernetes restart it? Keep external dependencies out of it. **Readiness** — can it serve traffic now? It fails during startup, shutdown or when critical dependencies are down, and Kubernetes stops routing traffic. Actuator exposes `/actuator/health/liveness` and `/readiness`.
+
+</QA>
+
+<QA q="How do you deploy a new version without downtime?" level="medium">
+
+Rolling updates (or blue/green / canary) behind a load balancer, readiness probes so new pods only receive traffic when ready, **graceful shutdown** (`server.shutdown=graceful` plus a `preStop` delay) so in-flight requests finish, and **backward-compatible** database migrations and API/event changes (expand → migrate → contract) so old and new versions can run side by side.
+
+</QA>
+
+<QA q="What metrics would you alert on for a REST service?" level="medium">
+
+The **RED** method — **R**ate (requests/s), **E**rrors (5xx ratio), **D**uration (p95/p99 latency) — per endpoint, plus saturation signals: CPU, heap after GC, GC pause time, connection-pool usage and wait time, thread-pool queue depth, Kafka consumer lag. Alert on symptoms that affect users (SLO burn rate) rather than every cause.
+
+</QA>

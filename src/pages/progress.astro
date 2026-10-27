@@ -1,0 +1,305 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/Icon.astro';
+import { TRACKS } from '../site.config';
+import { getLessons, lessonKey, lessonUrl } from '../lib/lessons';
+import { QUIZZES } from '../data/quizzes';
+
+const tracks = await Promise.all(
+  TRACKS.map(async (t) => {
+    const lessons = await getLessons(t.id);
+    return {
+      ...t,
+      lessons: lessons.map((l) => ({ key: lessonKey(t.id, l.id), url: lessonUrl(t.id, l.id), title: l.data.title })),
+    };
+  }),
+);
+const quizzes = QUIZZES.map((q) => ({ id: q.id, title: q.title, total: q.questions.length }));
+---
+
+<BaseLayout title="My Progress" description="Your completed lessons, bookmarks and quiz scores.">
+  <div class="container page">
+    <span class="eyebrow">Dashboard</span>
+    <h1>My progress</h1>
+    <p class="lede">Saved privately in this browser — nothing is sent to a server.</p>
+
+    <div class="track-grid">
+      {
+        tracks.map((t) => (
+          <div class="tp card" style={`--accent:${t.accent}`} data-track={t.id} data-lessons={JSON.stringify(t.lessons)}>
+            <div class="tp-head">
+              <span class="tp-icon">
+                <Icon name={t.icon} size={18} />
+              </span>
+              <span class="tp-title">{t.title}</span>
+              <span class="tp-pct" data-pct>
+                0%
+              </span>
+            </div>
+            <div class="progress-bar">
+              <span data-bar />
+            </div>
+            <div class="tp-foot">
+              <span>
+                <b data-count>0</b>/{t.lessons.length} lessons
+              </span>
+              <a href={t.lessons[0]?.url} data-next>
+                Start <Icon name="arrow-right" size={13} />
+              </a>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="two">
+      <section class="card panel">
+        <h2><Icon name="bookmark" size={17} /> Bookmarks</h2>
+        <ul class="list" data-bookmarks></ul>
+        <p class="empty" data-bookmarks-empty>No bookmarks yet. Use the Bookmark button on any lesson.</p>
+      </section>
+      <section class="card panel">
+        <h2><Icon name="trophy" size={17} /> Quiz scores</h2>
+        <ul class="list" data-quizzes={JSON.stringify(quizzes)}></ul>
+        <p class="empty" data-quizzes-empty>No quizzes taken yet. <a href="/quiz/">Try one →</a></p>
+      </section>
+    </div>
+
+    <section class="card panel known-panel">
+      <h2><Icon name="briefcase" size={17} /> Interview questions marked as known</h2>
+      <p><b data-known>0</b> questions. <a href="/interview/">Keep practising →</a></p>
+    </section>
+
+    <div class="danger">
+      <button class="btn btn-sm" data-reset><Icon name="reset" size={14} /> <span>Reset all progress</span></button>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../scripts/progress';
+
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+  function paint() {
+    const done = new Set(progress.completed());
+    document.querySelectorAll<HTMLElement>('[data-track]').forEach((card) => {
+      const lessons: { key: string; url: string; title: string }[] = JSON.parse(card.dataset.lessons!);
+      const count = lessons.filter((l) => done.has(l.key)).length;
+      const pct = Math.round((count / lessons.length) * 100);
+      card.querySelector('[data-count]')!.textContent = String(count);
+      card.querySelector('[data-pct]')!.textContent = `${pct}%`;
+      card.querySelector<HTMLElement>('[data-bar]')!.style.width = `${pct}%`;
+      const next = lessons.find((l) => !done.has(l.key));
+      const link = card.querySelector<HTMLAnchorElement>('[data-next]')!;
+      if (next) {
+        link.href = next.url;
+        link.firstChild!.textContent = count ? 'Continue ' : 'Start ';
+      } else {
+        link.firstChild!.textContent = 'Completed 🎉 ';
+      }
+    });
+
+    const bms = progress.bookmarks();
+    const bmList = document.querySelector<HTMLElement>('[data-bookmarks]')!;
+    bmList.innerHTML = bms
+      .map(
+        (b) =>
+          `<li><a href="${esc(b.url)}"><span class="li-sec">${esc(b.section)}</span>${esc(b.title)}</a>
+           <button class="rm" data-rm="${esc(b.key)}" aria-label="Remove bookmark">×</button></li>`,
+      )
+      .join('');
+    document.querySelector<HTMLElement>('[data-bookmarks-empty]')!.hidden = bms.length > 0;
+    bmList.querySelectorAll<HTMLButtonElement>('[data-rm]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const b = bms.find((x) => x.key === btn.dataset.rm)!;
+        progress.toggleBookmark(b);
+      }),
+    );
+
+    const scores = progress.quizScores();
+    const qList = document.querySelector<HTMLElement>('[data-quizzes]')!;
+    const quizzes: { id: string; title: string; total: number }[] = JSON.parse(qList.dataset.quizzes!);
+    const taken = quizzes.filter((q) => scores[q.id]);
+    qList.innerHTML = taken
+      .map((q) => {
+        const s = scores[q.id];
+        const pct = Math.round((s.best / s.total) * 100);
+        return `<li><a href="/quiz/${q.id}/">${esc(q.title)}</a><span class="score">${s.best}/${s.total} · ${pct}%</span></li>`;
+      })
+      .join('');
+    document.querySelector<HTMLElement>('[data-quizzes-empty]')!.hidden = taken.length > 0;
+
+    document.querySelector('[data-known]')!.textContent = String(progress.known().length);
+  }
+
+  const resetBtn = document.querySelector<HTMLButtonElement>('[data-reset]')!;
+  let armed = false;
+  resetBtn.addEventListener('click', () => {
+    if (!armed) {
+      armed = true;
+      resetBtn.querySelector('span')!.textContent = 'Click again to confirm';
+      setTimeout(() => {
+        armed = false;
+        resetBtn.querySelector('span')!.textContent = 'Reset all progress';
+      }, 4000);
+      return;
+    }
+    progress.reset();
+    armed = false;
+    resetBtn.querySelector('span')!.textContent = 'Progress reset';
+  });
+
+  window.addEventListener('jf:progress', paint);
+  paint();
+</script>
+
+<style>
+  .page {
+    padding-top: 48px;
+  }
+  h1 {
+    font-size: clamp(32px, 5vw, 46px);
+    letter-spacing: -0.03em;
+    margin: 0 0 8px;
+  }
+  .lede {
+    color: var(--muted);
+    margin: 0 0 32px;
+  }
+  .track-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .tp {
+    padding: 20px;
+  }
+  .tp-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .tp-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .tp-title {
+    font-weight: 650;
+  }
+  .tp-pct {
+    margin-left: auto;
+    font-weight: 700;
+    font-size: 20px;
+  }
+  .tp .progress-bar span {
+    background: var(--accent);
+  }
+  .tp-foot {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+  .tp-foot b {
+    color: var(--text);
+  }
+  .tp-foot a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .panel {
+    padding: 22px;
+  }
+  .panel h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-size: 17px;
+  }
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .list :global(li) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+  }
+  .list :global(li a) {
+    display: flex;
+    flex-direction: column;
+    font-weight: 550;
+  }
+  .list :global(li a:hover) {
+    color: var(--brand);
+  }
+  .list :global(.li-sec) {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .list :global(.score) {
+    font: 600 13px var(--font-mono);
+    color: var(--ok);
+  }
+  .list :global(.rm) {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .empty {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0;
+  }
+  .empty a,
+  .known-panel a {
+    color: var(--brand);
+  }
+  .known-panel {
+    margin-top: 16px;
+  }
+  .known-panel p {
+    margin: 0;
+    color: var(--muted);
+  }
+  .known-panel b {
+    color: var(--ok);
+    font-size: 18px;
+  }
+  .danger {
+    margin-top: 32px;
+  }
+  @media (max-width: 860px) {
+    .track-grid,
+    .two {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

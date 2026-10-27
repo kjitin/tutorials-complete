@@ -1,0 +1,119 @@
+---
+import Icon from '../Icon.astro';
+
+interface Props {
+  q: string;
+  level?: 'easy' | 'medium' | 'hard';
+  id?: string;
+}
+const { q, level = 'medium' } = Astro.props;
+const id =
+  Astro.props.id ??
+  q
+    .toLowerCase()
+    .replace(/[`'"]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+---
+
+<details class="qa" id={id} data-qa data-level={level} data-qa-id={id}>
+  <summary>
+    <span class="qa-q">{q}</span>
+    <span class="qa-meta">
+      <span class="qa-known-badge" title="You marked this as known"><Icon name="check" size={12} stroke={3} /></span>
+      <span class={`chip level-${level}`}>{level}</span>
+      <span class="qa-chev"><Icon name="chevron-down" size={16} /></span>
+    </span>
+  </summary>
+  <div class="qa-body">
+    <slot />
+    <div class="qa-foot">
+      <button type="button" class="btn btn-sm" data-known aria-pressed="false">
+        <Icon name="check" size={13} /> <span>I know this</span>
+      </button>
+      <a class="qa-link" href={`#${id}`}>Link</a>
+    </div>
+  </div>
+</details>
+
+<style>
+  .qa {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    transition: border-color 0.15s;
+  }
+  .qa + :global(.qa) {
+    margin-top: 10px;
+  }
+  .qa[open] {
+    border-color: var(--border-strong);
+  }
+  summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    cursor: pointer;
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  .qa-q {
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .qa-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .qa-meta .chip {
+    text-transform: capitalize;
+    font-size: 11px;
+  }
+  .qa-chev {
+    display: grid;
+    color: var(--muted);
+    transition: transform 0.2s;
+  }
+  .qa[open] .qa-chev {
+    transform: rotate(180deg);
+  }
+  .qa-known-badge {
+    display: none;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--ok);
+    color: #fff;
+  }
+  .qa:global(.known) .qa-known-badge {
+    display: grid;
+  }
+  .qa-body {
+    padding: 0 18px 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .qa-body > :global(* + *) {
+    margin-top: 0.9em;
+  }
+  .qa-foot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .qa-link {
+    font-size: 13px;
+    color: var(--muted) !important;
+    text-decoration: none !important;
+  }
+</style>

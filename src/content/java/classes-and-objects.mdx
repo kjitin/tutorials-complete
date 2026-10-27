@@ -1,0 +1,162 @@
+---
+title: Classes, Objects & Initialization
+description: Constructors, static vs instance members, initialization order, final, and how objects live on the heap.
+group: Fundamentals
+order: 2
+level: beginner
+tags: [basics, static, final]
+---
+
+## Classes and objects
+
+A **class** is a blueprint; an **object** is an instance created with `new`. Each object gets its own copy of **instance fields**, while **static fields** belong to the class and are shared by every instance.
+
+```java
+public class Counter {
+    private static int created = 0;     // one per class
+    private int count = 0;              // one per object
+
+    public Counter() { created++; }
+    public void increment() { count++; }
+
+    public static int created() { return created; }
+}
+```
+
+`Counter c = new Counter();` does three things: allocates memory on the **heap**, runs initialisers and the constructor, and stores a **reference** to the object in the variable `c` (which lives on the stack if it's a local).
+
+## Constructors
+
+- A class without a constructor gets a **default no-arg constructor**
+- Declaring *any* constructor removes the default one
+- `this(...)` chains to another constructor of the same class; `super(...)` to the parent — either must be the first statement
+- Constructors are not inherited
+
+```java
+public class Point {
+    private final int x, y;
+
+    public Point() { this(0, 0); }              // delegates
+    public Point(int x, int y) { this.x = x; this.y = y; }
+}
+```
+
+<Callout type="tip">
+Since **Java 22+** (preview in 22–24, final in Java 25), statements that don't reference `this` can appear before `super(...)` — handy for validating arguments. Java 21 code must still put `super(...)` first.
+</Callout>
+
+## Initialization order
+
+This is a classic interview question. Run it and predict the output first:
+
+<Playground title="InitOrder.java">
+
+```java
+class Parent {
+    static { System.out.println("1. Parent static block"); }
+    { System.out.println("3. Parent instance block"); }
+    Parent() { System.out.println("4. Parent constructor"); describe(); }
+    void describe() { System.out.println("   Parent.describe"); }
+}
+
+class Child extends Parent {
+    static { System.out.println("2. Child static block"); }
+    private String name = "child-field";
+    { System.out.println("5. Child instance block, name=" + name); }
+
+    Child() {
+        super();
+        System.out.println("6. Child constructor");
+    }
+
+    @Override void describe() {
+        // Called from Parent's constructor — Child's fields are NOT initialised yet!
+        System.out.println("   Child.describe, name=" + name);
+    }
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("--- first object ---");
+        new Child();
+        System.out.println("--- second object (static blocks don't run again) ---");
+        new Child();
+    }
+}
+```
+
+</Playground>
+
+The rules:
+
+1. **Static initialisation** runs once, when the class is first used — parent before child.
+2. For each `new`: the parent constructor runs first (instance initialisers then constructor body), then the child's **field initialisers and instance blocks in textual order**, then the child constructor body.
+
+<Callout type="danger">
+Notice `Child.describe, name=null`: calling an overridable method from a constructor runs subclass code **before the subclass's fields are initialised**. Never call overridable methods from constructors.
+</Callout>
+
+## static
+
+| | Static | Instance |
+| --- | --- | --- |
+| Belongs to | The class | Each object |
+| Access | `ClassName.member` | `object.member` |
+| Can use `this`? | No | Yes |
+| Typical use | Constants, factory methods, utilities, counters | Object state and behaviour |
+
+A **static nested class** doesn't hold a reference to an outer instance; an **inner class** (non-static) does — which can cause memory leaks if the inner object outlives the outer one. Prefer static nested classes unless you need the outer instance.
+
+## final
+
+`final` means different things depending on where it's used:
+
+- **final variable** — assigned exactly once. For references, the *reference* can't change, but the object can still be mutated (`final List<String> list` can still `add`)
+- **final method** — cannot be overridden
+- **final class** — cannot be extended (`String`, `Integer`, all records)
+
+```java
+final List<String> names = new ArrayList<>();
+names.add("Ada");          // fine — the list is mutable
+names = new ArrayList<>(); // compile error — the reference is final
+```
+
+## Immutable classes
+
+An immutable object can't change after construction — inherently thread-safe and safe to share or cache. Recipe:
+
+1. Make the class `final` (or use a `record`)
+2. Make all fields `private final`
+3. No setters
+4. Defensively copy mutable inputs and outputs
+
+```java
+public final class Team {
+    private final String name;
+    private final List<String> members;
+
+    public Team(String name, List<String> members) {
+        this.name = name;
+        this.members = List.copyOf(members);   // defensive, unmodifiable copy
+    }
+
+    public List<String> members() { return members; }   // already unmodifiable
+    public Team withMember(String m) {                  // "modification" returns a new object
+        var copy = new ArrayList<>(members); copy.add(m);
+        return new Team(name, copy);
+    }
+}
+```
+
+<Callout type="interview">
+Typical questions: *“Why is `String` immutable?”* (string pool safety, hashcode caching, security of class names/URLs, thread safety) and *“How do you make a class immutable?”* (the four steps above). Mention that `record` gives you most of this for free, but you still need defensive copies for mutable components.
+</Callout>
+
+## Pass-by-value
+
+Java is **always pass-by-value**. For objects, the value passed is a *copy of the reference*. A method can mutate the object the reference points to, but reassigning the parameter has no effect on the caller.
+
+```java
+void rename(StringBuilder sb) { sb.append("!"); }     // caller sees the change
+void replace(StringBuilder sb) { sb = new StringBuilder("new"); } // caller doesn't
+```

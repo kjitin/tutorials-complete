@@ -1,0 +1,149 @@
+---
+title: equals, hashCode, Comparable & Comparator
+description: The equals/hashCode contract, why breaking it corrupts HashMaps, and how to order objects with Comparable and Comparator.
+group: Fundamentals
+order: 7
+level: intermediate
+tags: [equals, hashcode, sorting]
+---
+
+## The equals contract
+
+`Object.equals` defaults to reference equality (`==`). Override it when two distinct objects can represent the **same value**. A correct `equals` must be:
+
+- **Reflexive** — `x.equals(x)` is true
+- **Symmetric** — `x.equals(y)` ⇔ `y.equals(x)`
+- **Transitive** — if `x.equals(y)` and `y.equals(z)` then `x.equals(z)`
+- **Consistent** — repeated calls return the same result if nothing changed
+- **Non-null** — `x.equals(null)` is false
+
+## The hashCode contract
+
+> If `a.equals(b)`, then `a.hashCode() == b.hashCode()`.
+
+The reverse isn't required: different objects may share a hash code (a *collision*). But if you override `equals` without `hashCode`, equal objects land in different hash buckets and `HashMap`/`HashSet` break:
+
+<Playground title="EqualsHashCode.java">
+
+```java
+import java.util.*;
+
+class BrokenPoint {
+    final int x, y;
+    BrokenPoint(int x, int y) { this.x = x; this.y = y; }
+    @Override public boolean equals(Object o) {
+        return o instanceof BrokenPoint p && p.x == x && p.y == y;
+    }
+    // hashCode NOT overridden — inherits identity hash from Object
+}
+
+class Point {
+    final int x, y;
+    Point(int x, int y) { this.x = x; this.y = y; }
+    @Override public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Point p)) return false;
+        return x == p.x && y == p.y;
+    }
+    @Override public int hashCode() { return Objects.hash(x, y); }
+}
+
+record RecordPoint(int x, int y) {}   // equals/hashCode/toString generated correctly
+
+class Main {
+    public static void main(String[] args) {
+        Set<BrokenPoint> broken = new HashSet<>();
+        broken.add(new BrokenPoint(1, 2));
+        System.out.println("broken contains: " + broken.contains(new BrokenPoint(1, 2)));   // false!
+
+        Set<Point> fixed = new HashSet<>();
+        fixed.add(new Point(1, 2));
+        System.out.println("fixed contains:  " + fixed.contains(new Point(1, 2)));          // true
+
+        System.out.println("record contains: " + Set.of(new RecordPoint(1, 2)).contains(new RecordPoint(1, 2)));
+    }
+}
+```
+
+</Playground>
+
+<Callout type="tip">
+In modern Java, prefer **records** for value types — `equals`, `hashCode` and `toString` are generated from the components and are always consistent. Otherwise use your IDE's generator or `Objects.equals` / `Objects.hash`.
+</Callout>
+
+## Mutable keys are dangerous
+
+If a field used in `hashCode` changes **after** the object is put in a `HashSet` or used as a `HashMap` key, the object is now in the wrong bucket and can't be found — or removed. Use immutable keys.
+
+## Entities and equality
+
+For JPA entities, equality is subtle: the database id is `null` before persisting. Common strategies are to compare by a **natural/business key** (e.g. ISBN, email) or by id with a constant `hashCode()`:
+
+```java
+@Override public boolean equals(Object o) {
+    return o instanceof Book other && id != null && id.equals(other.id);
+}
+@Override public int hashCode() { return getClass().hashCode(); }   // stable across persist
+```
+
+## Comparable — natural ordering
+
+Implement `Comparable<T>` when a type has one obvious order. `compareTo` returns negative, zero or positive.
+
+```java
+public record Version(int major, int minor, int patch) implements Comparable<Version> {
+    @Override
+    public int compareTo(Version o) {
+        return Comparator.comparingInt(Version::major)
+                         .thenComparingInt(Version::minor)
+                         .thenComparingInt(Version::patch)
+                         .compare(this, o);
+    }
+}
+```
+
+<Callout type="warn">
+Keep `compareTo` **consistent with equals**: `a.compareTo(b) == 0` should mean `a.equals(b)`. `TreeSet` and `TreeMap` use `compareTo`, not `equals`, to detect duplicates — `new BigDecimal("1.0")` and `new BigDecimal("1.00")` are different in a `HashSet` but the same in a `TreeSet`.
+</Callout>
+
+## Comparator — external orderings
+
+A `Comparator<T>` defines an order outside the class — useful for multiple orderings or types you don't own. Java 8's combinators make them declarative:
+
+<Playground title="Comparators.java">
+
+```java
+import java.util.*;
+
+record Employee(String name, String dept, double salary, Integer age) {}
+
+class Main {
+    public static void main(String[] args) {
+        List<Employee> staff = new ArrayList<>(List.of(
+            new Employee("Ada", "Eng", 120_000, 36),
+            new Employee("Bob", "Sales", 70_000, null),
+            new Employee("Cy", "Eng", 95_000, 29),
+            new Employee("Dee", "Sales", 70_000, 41),
+            new Employee("Eve", "Eng", 120_000, 31)));
+
+        staff.sort(Comparator.comparing(Employee::dept)
+                             .thenComparing(Employee::salary, Comparator.reverseOrder())
+                             .thenComparing(Employee::name));
+        staff.forEach(e -> System.out.println(e.dept() + "  " + e.salary() + "  " + e.name()));
+
+        System.out.println("--- by age, nulls last ---");
+        staff.sort(Comparator.comparing(Employee::age, Comparator.nullsLast(Comparator.naturalOrder())));
+        staff.forEach(e -> System.out.println(e.age() + "  " + e.name()));
+    }
+}
+```
+
+</Playground>
+
+<Callout type="danger" title="Don't subtract in comparators">
+`(a, b) -> a.value - b.value` overflows for large or negative ints and produces wrong orderings. Use `Integer.compare(a, b)` or `Comparator.comparingInt(...)`.
+</Callout>
+
+<Callout type="interview">
+*“What happens if you override `equals` but not `hashCode`?”* — hash-based collections stop finding equal objects (demo above). *“Comparable vs Comparator?”* — `Comparable` is the type's single natural order, implemented by the class itself (`compareTo`); `Comparator` is any number of external orders, passed to sort methods and sorted collections.
+</Callout>

@@ -1,0 +1,82 @@
+---
+title: SOLID & Object-Oriented Design
+description: The SOLID principles, composition vs inheritance, coupling and cohesion, and low-level design questions.
+track: design-patterns
+order: 21
+---
+
+<QA q="What are the SOLID principles?" level="easy">
+
+- **S**ingle Responsibility — one reason to change.
+- **O**pen/Closed — extend behaviour without modifying existing code.
+- **L**iskov Substitution — subtypes must work wherever the base type is expected.
+- **I**nterface Segregation — small, client-specific interfaces.
+- **D**ependency Inversion — depend on abstractions; high-level policy shouldn't depend on low-level details.
+
+</QA>
+
+<QA q="Give an example of violating the Single Responsibility Principle." level="easy">
+
+An `Invoice` class that calculates totals, renders a PDF and saves itself to the database changes for three different stakeholders — finance, design and the DBA. Split it into `Invoice` (domain rules), `InvoicePdfRenderer` and `InvoiceRepository`.
+
+</QA>
+
+<QA q="How do you apply the Open/Closed Principle in practice?" level="medium">
+
+Identify the axis of change and put it behind an abstraction: a `Discount` interface with one implementation per rule, injected as a list. New promotions are new classes; `Checkout` never changes. Strategy, Decorator, Observer and Template Method are all OCP tools; sealed types with exhaustive switches are the opposite trade-off (easy new operations, closed set of types).
+
+</QA>
+
+<QA q="Explain the Liskov Substitution Principle with the Square/Rectangle example." level="medium">
+
+If `Square extends Rectangle` and `setWidth` also changes the height, code that sets width 5 and height 4 then expects area 20 breaks for a square (16). The subclass strengthens the contract, so it isn't substitutable. Real-world violations: subclasses throwing `UnsupportedOperationException` (like immutable `List.of` lists) or ignoring parent behaviour. Fix with separate types or composition.
+
+</QA>
+
+<QA q="Dependency Inversion vs Inversion of Control vs Dependency Injection?" level="medium">
+
+**Dependency Inversion** is a design principle: both high- and low-level modules depend on abstractions (`OrderService` → `PaymentGateway` interface ← `StripeGateway`). **IoC** is a broader idea: a framework calls your code and manages object lifecycles. **DI** is a technique — passing dependencies in — that IoC containers like Spring automate, and the usual way to achieve DIP.
+
+</QA>
+
+<QA q="Composition vs inheritance — when do you prefer each?" level="medium">
+
+Prefer **composition** (*has-a*): it's flexible at runtime, avoids the fragile base class problem, and doesn't expose parent internals. Use **inheritance** (*is-a*) when there's a genuine subtype relationship that satisfies Liskov and the parent is designed for extension (abstract template classes). "Favour composition over inheritance" is a GoF principle.
+
+</QA>
+
+<QA q="What are coupling and cohesion?" level="easy">
+
+**Coupling** is how much modules depend on each other — aim for **low** coupling so changes stay local. **Cohesion** is how closely a module's responsibilities belong together — aim for **high** cohesion. SRP increases cohesion; DIP, interfaces and events reduce coupling.
+
+</QA>
+
+<QA q="What is the Law of Demeter?" level="medium">
+
+"Talk only to your immediate friends": a method should call methods on itself, its fields, its parameters and objects it creates — not reach through chains like `order.getCustomer().getAddress().getCity()`. Chains couple you to the whole object graph. Fix by asking objects to do work (`order.shippingCity()`) or by introducing a facade.
+
+</QA>
+
+<QA q="What is YAGNI and how does it relate to design patterns?" level="easy">
+
+"You Aren't Gonna Need It": don't build abstractions for hypothetical future requirements. Patterns add indirection and types; apply them when a real force — duplicated conditionals, untestable dependencies, classes changing for unrelated reasons — justifies the cost. Pair it with KISS and refactor toward patterns when the need appears.
+
+</QA>
+
+<QA q="Design a parking lot (low-level design). How would you approach it?" level="hard">
+
+1. **Clarify requirements**: vehicle and spot types, multiple floors, entry/exit gates, tickets, pricing, payment, capacity display.
+2. **Identify entities**: `ParkingLot`, `Floor`, `Spot` (sealed: compact, large, EV), `Vehicle`, `Ticket`, `Gate`, `Payment`.
+3. **Assign responsibilities and patterns**: Strategy for **pricing** and **spot allocation**, Factory for spots/vehicles, State for spot status, Observer to update display boards, Singleton/DI-managed `ParkingLot`.
+4. **Handle concurrency**: two cars must not take the same spot — atomic allocation (`ConcurrentHashMap`, locks or a DB constraint).
+5. **Walk through flows**: park → ticket → exit → price → pay → free the spot.
+
+Interviewers look for clarifying questions, clean responsibilities and extensibility, not a perfect class count.
+
+</QA>
+
+<QA q="How would you design an extensible notification system?" level="hard">
+
+Define a `NotificationChannel` interface (email, SMS, push, Slack) — **Strategy**, injected as a `Map` by channel. Use a **template/decorator** pipeline for formatting, rate limiting and retries; **Observer/events** so domain services publish `OrderShipped` without knowing about channels; user preferences decide which channels fire; a queue (Kafka) and the outbox pattern for reliability; idempotency keys to avoid duplicate sends. New channels are new classes — Open/Closed.
+
+</QA>

@@ -1,0 +1,171 @@
+---
+title: Design Patterns
+description: Creational, structural and behavioural Gang of Four patterns — intent, trade-offs, comparisons and where Java and Spring use them.
+track: design-patterns
+order: 20
+---
+
+## General
+
+<QA q="What are design patterns and why use them?" level="easy">
+
+Named, reusable solutions to recurring object-oriented design problems, catalogued by the Gang of Four in 1994 into **creational**, **structural** and **behavioural** families. They give teams a shared vocabulary ("wrap it in a decorator") and encode proven trade-offs. Apply them when you feel the pain they remove — not pre-emptively.
+
+</QA>
+
+<QA q="Which design patterns does Spring use?" level="medium">
+
+- **Singleton** — default bean scope
+- **Factory** — `BeanFactory`, `FactoryBean`, `@Bean` methods
+- **Proxy** — AOP for `@Transactional`, `@Async`, `@Cacheable`, security
+- **Template Method** — `JdbcTemplate`, `RestTemplate`, `TransactionTemplate`
+- **Observer** — `ApplicationEventPublisher` / `@EventListener`
+- **Strategy** — `PasswordEncoder`, `HandlerMethodArgumentResolver`, injected `List`/`Map` of implementations
+- **Chain of Responsibility** — security filter chain, interceptors
+- **Adapter** — `HandlerAdapter` in Spring MVC
+- **Front Controller** — `DispatcherServlet`
+
+</QA>
+
+## Creational
+
+<QA q="What are the ways to implement a thread-safe Singleton in Java?" level="medium">
+
+1. **Enum singleton** — simplest, thread-safe, resistant to reflection and serialization.
+2. **Initialization-on-demand holder** — a static nested class holds the instance; the JVM's class initialisation makes it lazy and thread-safe.
+3. **Double-checked locking** with a `volatile` field.
+4. Eager `static final` field — simple if laziness doesn't matter.
+
+```java
+public enum Config { INSTANCE; }
+```
+
+</QA>
+
+<QA q="How can a Singleton be broken, and how do you protect it?" level="hard">
+
+- **Reflection** — calling the private constructor: throw if an instance already exists.
+- **Serialization** — deserialising creates a new object: implement `readResolve()` to return the instance.
+- **Cloning** — don't implement `Cloneable` (or throw from `clone`).
+- **Multiple class loaders** — each loader gets its own instance.
+
+The **enum** form is immune to the first three.
+
+</QA>
+
+<QA q="Why is Singleton often called an anti-pattern?" level="medium">
+
+It's global mutable state in disguise: hidden dependencies, tight coupling, hard to mock, and order-dependent tests. In DI frameworks, let the container manage a single instance (Spring's singleton scope) and inject it through constructors instead.
+
+</QA>
+
+<QA q="Factory Method vs Abstract Factory?" level="medium">
+
+**Factory Method** creates **one** product through a method that subclasses override (or a static factory that chooses an implementation). **Abstract Factory** is an **object** with several factory methods that create a **family** of related products guaranteed to work together (e.g. AWS storage + AWS queue). Adding a new family is easy; adding a new product type changes every factory.
+
+</QA>
+
+<QA q="When would you use the Builder pattern?" level="easy">
+
+For objects with **many parameters**, especially optional ones (telescoping constructors are unreadable), when you want **immutability** with readable construction, and to validate cross-field rules in one place (`build()`). JDK and Spring examples: `StringBuilder`, `HttpRequest.newBuilder()`, `UriComponentsBuilder`, `RestClient.builder()`. Lombok's `@Builder` generates one.
+
+</QA>
+
+<QA q="What is the Prototype pattern and why avoid Cloneable?" level="medium">
+
+Prototype creates objects by **copying** a configured instance. `Cloneable`/`Object.clone()` is broken by design: no `clone()` on the interface, a protected method returning `Object`, a checked exception, shallow copies, constructors bypassed, and conflicts with `final` fields. Prefer **copy constructors** or copy factory methods, and make deep copies of mutable fields.
+
+</QA>
+
+## Structural
+
+<QA q="Adapter vs Facade vs Decorator vs Proxy?" level="hard">
+
+| Pattern | Interface | Purpose |
+| --- | --- | --- |
+| **Adapter** | Converts to a different, *existing* one | Make incompatible things work together |
+| **Facade** | Defines a *new, simpler* one over many classes | Simplify a subsystem |
+| **Decorator** | Same as the wrapped object | **Add behaviour**, stackable |
+| **Proxy** | Same as the subject | **Control access** — lazy loading, security, caching, remote calls |
+
+</QA>
+
+<QA q="Give a JDK example of the Decorator pattern." level="easy">
+
+`java.io`: `new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(file))))` — each wrapper implements the same stream abstraction and adds buffering, character decoding or decompression. Also `Collections.unmodifiableList` and `synchronizedMap`.
+
+</QA>
+
+<QA q="What is the Composite pattern? Where is it used?" level="medium">
+
+Compose objects into **trees** where leaves and composites share one interface, so clients treat a single item and a group uniformly (`size()` of a file or a directory). Used for file systems, UI component trees (Swing's `Container`), the DOM, ASTs and menus.
+
+</QA>
+
+<QA q="What problem does the Bridge pattern solve?" level="hard">
+
+A **class explosion** when two independent dimensions vary — `UrgentSmsNotification`, `RegularEmailNotification`… (M × N classes). Bridge splits them into two hierarchies — abstraction (urgency) and implementation (channel) — joined by composition (M + N classes). JDBC (API vs drivers) and SLF4J (API vs logging backends) are bridges.
+
+</QA>
+
+<QA q="What is the Flyweight pattern? Give a JDK example." level="medium">
+
+Sharing immutable **intrinsic state** across many fine-grained objects to save memory, with **extrinsic state** passed in. JDK examples: `Integer.valueOf` caching -128..127, the String pool, enum constants. It's why `Integer a = 127, b = 127; a == b` is true but fails for 128 — always compare boxed values with `equals`.
+
+</QA>
+
+## Behavioural
+
+<QA q="Strategy vs State?" level="medium">
+
+Same structure (a context holding an interface), different intent. **Strategy**: the **client** chooses an interchangeable algorithm, usually fixed once configured, and strategies don't know each other. **State**: the object's behaviour changes with its internal state, and **states trigger transitions** to other states themselves.
+
+</QA>
+
+<QA q="How would you remove a large switch statement on a type code?" level="medium">
+
+Replace conditional with polymorphism: an interface per behaviour (Strategy) with one implementation per case, registered in a `Map` — in Spring, inject `List<PaymentStrategy>` and index it by a `method()` key. Adding a case becomes adding a class. Alternatively, for a closed set of types, a **sealed interface + exhaustive switch** keeps the logic in one place with compiler-checked completeness.
+
+</QA>
+
+<QA q="Template Method vs Strategy?" level="medium">
+
+**Template Method** fixes an algorithm's skeleton in a base class and lets **subclasses** override steps — inheritance, chosen at compile time. **Strategy** swaps the whole algorithm via **composition** at runtime. Spring's `JdbcTemplate` is a hybrid: a template method that takes callbacks (tiny strategies) as lambdas.
+
+</QA>
+
+<QA q="Explain the Observer pattern and how Spring implements it." level="easy">
+
+A subject notifies registered observers of events without knowing who they are — a one-to-many dependency. Spring: `ApplicationEventPublisher.publishEvent(event)` and `@EventListener` / `@TransactionalEventListener` methods. Watch for listener failures, memory leaks from never-unregistered listeners, and synchronous execution in the publisher's thread by default. `java.util.Observable` is deprecated.
+
+</QA>
+
+<QA q="Command pattern — what is it good for?" level="medium">
+
+It turns a request into an object holding the action and its parameters. That enables **queuing**, **scheduling**, **logging**, **retrying** and **undo/redo** (commands capture state to reverse themselves). `Runnable`/`Callable` submitted to an executor, job queues and CQRS commands are examples.
+
+</QA>
+
+<QA q="Chain of Responsibility — where have you seen it?" level="medium">
+
+A request passes along a chain of handlers; each handles it, passes it on, or stops the chain. Servlet filters and the **Spring Security filter chain**, Spring MVC interceptors, Spring Cloud Gateway filters, logging handler hierarchies, and approval workflows.
+
+</QA>
+
+<QA q="What is double dispatch and how does the Visitor pattern achieve it?" level="hard">
+
+Choosing behaviour based on the runtime types of **two** objects. Java dispatches only on the receiver, so Visitor uses two calls: `element.accept(visitor)` dispatches on the element's type, then `visitor.visitCircle(this)` dispatches on the visitor's type. In Java 21, **sealed interfaces with pattern-matching switch** give the same exhaustive, type-safe dispatch with far less code.
+
+</QA>
+
+<QA q="Memento vs Command for implementing undo?" level="hard">
+
+**Command with inverse operations** stores small commands that know how to reverse themselves — memory-efficient but you must write each inverse. **Memento** stores snapshots of state before each change — simple and generic but memory-hungry. Real editors combine them: commands, with mementos or diffs for complex steps, plus periodic snapshots.
+
+</QA>
+
+<QA q="Mediator vs Observer?" level="hard">
+
+**Observer** is one-way broadcast from a subject to subscribers that don't coordinate. **Mediator** centralises **two-way** coordination among peers that would otherwise reference each other (a dialog coordinating widgets, a chat room). Event buses blur the two: publishers and listeners are decoupled through the mediator-like infrastructure.
+
+</QA>

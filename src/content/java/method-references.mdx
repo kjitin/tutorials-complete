@@ -1,0 +1,110 @@
+---
+title: Method References
+description: The four kinds of method references, how they map to functional interfaces, and when they beat a lambda.
+group: Functional Java (Java 8+)
+order: 2
+level: beginner
+tags: [java8, lambdas]
+---
+
+A **method reference** is shorthand for a lambda that only calls an existing method. `String::length` means the same as `s -> s.length()` — but reads as *what* rather than *how*.
+
+## The four kinds
+
+| Kind | Syntax | Equivalent lambda | Example |
+| --- | --- | --- | --- |
+| Static method | `ClassName::staticMethod` | `(args) -> ClassName.staticMethod(args)` | `Integer::parseInt` |
+| Instance method of a **particular** object | `object::method` | `(args) -> object.method(args)` | `System.out::println` |
+| Instance method of an **arbitrary** object of a type | `ClassName::instanceMethod` | `(obj, args) -> obj.method(args)` | `String::toUpperCase` |
+| Constructor | `ClassName::new` | `(args) -> new ClassName(args)` | `ArrayList::new` |
+
+The third kind trips people up: in `String::compareToIgnoreCase`, the **first lambda parameter becomes the receiver**, so it fits `Comparator<String>`: `(a, b) -> a.compareToIgnoreCase(b)`.
+
+<Playground title="MethodReferences.java">
+
+```java
+import java.util.*;
+import java.util.function.*;
+import java.util.stream.*;
+
+record Product(String name, double price) {
+    static boolean isCheap(Product p) { return p.price() < 10; }
+    String label() { return name + " (£" + price + ")"; }
+}
+
+class PriceFormatter {
+    private final String currency;
+    PriceFormatter(String currency) { this.currency = currency; }
+    String format(Product p) { return currency + String.format("%.2f", p.price()); }
+}
+
+class Main {
+    public static void main(String[] args) {
+        // 1. Static method reference
+        List<Integer> nums = Stream.of("3", "1", "2").map(Integer::parseInt).toList();
+        System.out.println(nums);
+
+        List<Product> products = List.of(new Product("Pen", 1.5), new Product("Lamp", 24), new Product("Mug", 8));
+        System.out.println(products.stream().filter(Product::isCheap).map(Product::name).toList());
+
+        // 2. Bound instance method reference — a particular object
+        var gbp = new PriceFormatter("£");
+        products.stream().map(gbp::format).forEach(System.out::println);
+
+        // 3. Unbound instance method reference — arbitrary object of the type
+        List<String> words = new ArrayList<>(List.of("banana", "Apple", "cherry"));
+        words.sort(String::compareToIgnoreCase);          // (a, b) -> a.compareToIgnoreCase(b)
+        System.out.println(words);
+        BiFunction<String, Integer, Character> charAt = String::charAt;   // (s, i) -> s.charAt(i)
+        System.out.println(charAt.apply("hello", 1));
+        Function<Product, String> label = Product::label;
+        System.out.println(label.apply(products.get(1)));
+
+        // 4. Constructor references
+        Supplier<List<String>> listFactory = ArrayList::new;
+        BiFunction<String, Double, Product> maker = Product::new;
+        Function<Integer, int[]> arrayMaker = int[]::new;
+        System.out.println(listFactory.get().getClass().getSimpleName() + " "
+            + maker.apply("Desk", 199.0) + " " + arrayMaker.apply(5).length);
+
+        // Collecting into a specific collection type
+        TreeSet<String> sorted = words.stream().collect(Collectors.toCollection(TreeSet::new));
+        String[] array = words.toArray(String[]::new);
+        System.out.println(sorted + " " + array.length);
+    }
+}
+```
+
+</Playground>
+
+## Lambda or method reference?
+
+Prefer a method reference when it is **shorter and clearer**:
+
+```java
+.map(User::email)                     // ✓ clearer than u -> u.email()
+.forEach(System.out::println)         // ✓
+.map(s -> s.substring(0, 3))          // lambda — has an extra argument
+.filter(u -> !u.isActive())           // lambda — or Predicate.not(User::isActive)
+```
+
+`Predicate.not(...)` (Java 11) lets you negate a method reference: `.filter(Predicate.not(String::isBlank))`.
+
+<Callout type="warn" title="Ambiguity">
+Overloaded methods can make a reference ambiguous. `Integer::toString` matches both the static `Integer.toString(int)` and the instance `i.toString()`, so `Function<Integer, String> f = Integer::toString;` fails to compile. Use a lambda in such cases.
+</Callout>
+
+## Evaluation timing
+
+A bound reference evaluates its receiver **once, when the reference is created**, while the equivalent lambda evaluates it every time it runs:
+
+```java
+Supplier<String> ref = config.current()::name;           // config.current() called NOW
+Supplier<String> lambda = () -> config.current().name(); // called on each get()
+```
+
+The bound form also throws `NullPointerException` immediately if the receiver is `null`.
+
+<Callout type="interview">
+Be ready to classify examples: `Math::max` (static), `list::add` (bound), `String::length` (unbound — receiver is the argument), `HashMap::new` (constructor). And explain why `String::compareTo` fits `Comparator<String>` even though `compareTo` takes one argument.
+</Callout>

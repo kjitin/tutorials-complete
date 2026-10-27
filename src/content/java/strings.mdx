@@ -1,0 +1,120 @@
+---
+title: Strings, StringBuilder & the String Pool
+description: Why String is immutable, how the string pool and interning work, == vs equals, and efficient string building.
+group: Fundamentals
+order: 6
+level: beginner
+tags: [strings, immutability, memory]
+---
+
+## String is immutable
+
+Every "modification" of a `String` — `concat`, `replace`, `toUpperCase` — returns a **new** object. The original never changes.
+
+```java
+String s = "hello";
+s.toUpperCase();          // result discarded
+System.out.println(s);    // "hello"
+s = s.toUpperCase();      // reassign the reference to the new object
+```
+
+Why immutability?
+
+- **String pool** — identical literals can be safely shared
+- **Security** — file paths, URLs, class names and DB credentials can't be changed after validation
+- **Thread safety** — immutable objects need no synchronisation
+- **Hash caching** — `hashCode()` is computed once, making strings excellent `HashMap` keys
+
+## The string pool
+
+String **literals** are stored in a pool (in the heap since Java 7). The JVM reuses the same object for identical literals; `new String(...)` always creates a new object.
+
+<Playground title="StringPool.java">
+
+```java
+class Main {
+    public static void main(String[] args) {
+        String a = "java";
+        String b = "java";
+        String c = new String("java");
+        String d = c.intern();
+        String e = "ja" + "va";              // compile-time constant -> folded into "java"
+        String part = "ja";
+        String f = part + "va";              // computed at runtime -> new object
+
+        System.out.println("a == b        " + (a == b));        // same pooled literal
+        System.out.println("a == c        " + (a == c));        // c is a new heap object
+        System.out.println("a.equals(c)   " + a.equals(c));     // same characters
+        System.out.println("a == d        " + (a == d));        // intern() returns the pooled one
+        System.out.println("a == e        " + (a == e));
+        System.out.println("a == f        " + (a == f));
+        System.out.println("a == f.intern " + (a == f.intern()));
+    }
+}
+```
+
+</Playground>
+
+<Callout type="danger">
+**Always compare strings with `equals()`** (or `equalsIgnoreCase`). `==` compares references and only "works" by accident for pooled literals — then fails for strings read from a file, request or database.
+</Callout>
+
+## Concatenation performance
+
+In a loop, `+=` creates a new string every iteration — O(n²) copying:
+
+```java
+String csv = "";
+for (String s : items) csv += s + ",";        // slow for large lists
+```
+
+Use `StringBuilder` (not thread-safe, fast) — or better, a higher-level API:
+
+```java
+var sb = new StringBuilder();
+for (String s : items) sb.append(s).append(',');
+
+String joined = String.join(",", items);
+String joined2 = items.stream().collect(Collectors.joining(", ", "[", "]"));
+```
+
+<Callout type="tip">
+For a **single expression** like `"Hello " + name + "!"`, `+` is fine — since Java 9 the compiler uses `invokedynamic` (`StringConcatFactory`) to build it efficiently. Only loops need a `StringBuilder`.
+</Callout>
+
+| | `String` | `StringBuilder` | `StringBuffer` |
+| --- | --- | --- | --- |
+| Mutable | No | Yes | Yes |
+| Thread-safe | Yes (immutable) | No | Yes (synchronised) |
+| Use when | Values, keys, constants | Building strings in one thread | Legacy code — rarely needed |
+
+## Useful modern String APIs
+
+```java
+"  hi  ".strip();                // "hi" — Unicode-aware (Java 11), prefer over trim()
+"".isBlank();                    // true (Java 11)
+"ab".repeat(3);                  // "ababab" (Java 11)
+"a\nb\nc".lines().count();       // 3 (Java 11)
+"Hello %s".formatted("Ada");     // "Hello Ada" (Java 15)
+"ABC".chars().sum();             // IntStream of code units
+"hello".indent(4);               // adds 4 spaces to each line (Java 12)
+```
+
+Text blocks (Java 15) make multi-line strings readable:
+
+```java
+String json = """
+    {
+      "name": "Ada",
+      "role": "admin"
+    }
+    """;
+```
+
+## Compact strings
+
+Since Java 9, a `String` stores its characters in a `byte[]` with a coder flag: Latin-1 strings use **one byte per character** instead of two, roughly halving memory for typical English text. This is invisible to your code.
+
+<Callout type="interview">
+Classic questions: *“How many objects does `new String("abc")` create?”* — up to two: the pooled literal `"abc"` (if not already in the pool) plus the new heap object. *“Why is `char[]` preferred over `String` for passwords?”* — you can zero out an array after use, but an immutable string lingers in memory until garbage collected, and may be in the pool.
+</Callout>

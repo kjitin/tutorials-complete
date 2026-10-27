@@ -1,0 +1,154 @@
+---
+title: Lambdas & Functional Interfaces
+description: Lambda syntax, the java.util.function toolkit, effectively-final captures, and composing behaviour with Java 8+.
+group: Functional Java (Java 8+)
+order: 1
+level: beginner
+tags: [java8, lambdas, functional]
+---
+
+## From anonymous classes to lambdas
+
+A **lambda expression** is a concise implementation of a **functional interface** — an interface with exactly one abstract method.
+
+```java
+// Java 7
+Collections.sort(names, new Comparator<String>() {
+    @Override
+    public int compare(String a, String b) {
+        return Integer.compare(a.length(), b.length());
+    }
+});
+
+// Java 8+
+names.sort((a, b) -> Integer.compare(a.length(), b.length()));
+names.sort(Comparator.comparingInt(String::length));     // even better
+```
+
+## Syntax
+
+```java
+() -> 42                                  // no parameters
+x -> x * 2                                // one parameter, parentheses optional
+(x, y) -> x + y                           // several parameters
+(String s, int n) -> s.repeat(n)          // explicit types
+(var a, var b) -> a.compareTo(b)          // var (Java 11), allows annotations
+s -> {                                    // block body needs return
+    String trimmed = s.strip();
+    return trimmed.isEmpty() ? "<blank>" : trimmed;
+}
+```
+
+## The core functional interfaces
+
+| Interface | Signature | Typical use |
+| --- | --- | --- |
+| `Supplier<T>` | `() → T` | Lazy values, factories: `Optional.orElseGet` |
+| `Consumer<T>` | `T → void` | Side effects: `forEach` |
+| `BiConsumer<T,U>` | `(T, U) → void` | `Map.forEach` |
+| `Function<T,R>` | `T → R` | Transform: `stream.map` |
+| `BiFunction<T,U,R>` | `(T, U) → R` | `Map.merge`, `compute` |
+| `UnaryOperator<T>` | `T → T` | `List.replaceAll` |
+| `BinaryOperator<T>` | `(T, T) → T` | `reduce` |
+| `Predicate<T>` | `T → boolean` | Filter: `stream.filter`, `removeIf` |
+| `BiPredicate<T,U>` | `(T, U) → boolean` | Two-argument tests |
+
+**Primitive specialisations** avoid boxing: `IntPredicate`, `IntFunction<R>`, `ToIntFunction<T>`, `IntUnaryOperator`, `IntBinaryOperator`, `LongSupplier`, `DoubleConsumer` and so on.
+
+## Composition
+
+Functional interfaces come with `default` methods that combine them:
+
+<Playground title="Lambdas.java">
+
+```java
+import java.util.*;
+import java.util.function.*;
+
+record User(String name, int age, boolean active, String email) {}
+
+class Main {
+    public static void main(String[] args) {
+        List<User> users = List.of(
+            new User("ada", 36, true, "ada@example.com"),
+            new User("bob", 17, true, "bob@example"),
+            new User("cy", 52, false, "cy@example.com"),
+            new User("dee", 24, true, "dee@example.com"));
+
+        // Predicate composition
+        Predicate<User> adult = u -> u.age() >= 18;
+        Predicate<User> active = User::active;
+        Predicate<User> validEmail = u -> u.email().matches("[^@]+@[^@]+\\.[a-z]+");
+        Predicate<User> eligible = adult.and(active).and(validEmail);
+        users.stream().filter(eligible).map(User::name).forEach(n -> System.out.println("eligible: " + n));
+        users.stream().filter(eligible.negate()).map(User::name).forEach(n -> System.out.println("not:      " + n));
+
+        // Function composition: andThen applies left-to-right, compose right-to-left
+        Function<String, String> trim = String::strip;
+        Function<String, String> upper = String::toUpperCase;
+        Function<String, Integer> length = String::length;
+        System.out.println(trim.andThen(upper).apply("  hello  "));
+        System.out.println(trim.andThen(length).apply("  hello  "));
+        System.out.println(upper.compose(trim).apply("  world "));
+
+        // Supplier: deferred / lazy evaluation
+        Supplier<String> expensive = () -> { System.out.println("  (computing default…)"); return "default"; };
+        System.out.println(Optional.of("present").orElseGet(expensive));   // supplier never called
+        System.out.println(Optional.<String>empty().orElseGet(expensive)); // called
+
+        // BinaryOperator with reduce, and a higher-order function returning a lambda
+        BinaryOperator<Integer> max = BinaryOperator.maxBy(Comparator.naturalOrder());
+        System.out.println(List.of(4, 9, 2).stream().reduce(max).orElseThrow());
+        Function<Integer, UnaryOperator<Integer>> adder = n -> x -> x + n;   // currying
+        System.out.println(adder.apply(10).apply(5));
+    }
+}
+```
+
+</Playground>
+
+## Capturing variables: effectively final
+
+Lambdas can read local variables from the enclosing scope only if they are **final or effectively final** (never reassigned):
+
+```java
+int threshold = 10;
+list.removeIf(x -> x > threshold);        // ✓
+
+int count = 0;
+list.forEach(x -> count++);               // ✗ compile error: count is modified
+```
+
+Why? Local variables live on the stack and the lambda may run later, on another thread, after the method returns. Java captures the **value**; allowing mutation would create confusing semantics and data races. Use `AtomicInteger`, a stream operation (`count()`), or redesign.
+
+<Callout type="tip">
+`this` inside a lambda refers to the **enclosing instance**, unlike an anonymous class where `this` is the anonymous object. Lambdas also don't introduce a new scope for variable names — you can't shadow a local variable.
+</Callout>
+
+## Custom functional interfaces
+
+Use the built-ins when they fit. Define your own when you need a **meaningful name**, **checked exceptions**, or more parameters:
+
+```java
+@FunctionalInterface
+public interface ThrowingFunction<T, R> {
+    R apply(T t) throws Exception;
+
+    static <T, R> Function<T, R> unchecked(ThrowingFunction<T, R> f) {
+        return t -> {
+            try { return f.apply(t); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        };
+    }
+}
+
+paths.stream().map(ThrowingFunction.unchecked(Files::readString)).toList();
+```
+
+## How lambdas are compiled
+
+Lambdas are **not** anonymous inner classes. The compiler emits an `invokedynamic` instruction; at first call, `LambdaMetafactory` spins up a lightweight implementation. Non-capturing lambdas are typically singletons — no allocation per evaluation.
+
+<Callout type="interview">
+*“What is a functional interface?”* — an interface with a single abstract method (default and static methods don't count; neither do abstract methods that match `Object`'s public methods, which is why `Comparator` with its `equals` still qualifies). *“Why must captured variables be effectively final?”* — the value is copied into the lambda, which may outlive the stack frame or run concurrently.
+</Callout>

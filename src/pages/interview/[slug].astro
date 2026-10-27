@@ -1,0 +1,320 @@
+---
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Icon from '../../components/Icon.astro';
+import AdSlot from '../../components/AdSlot.astro';
+import { mdxComponents } from '../../components/mdx';
+import { trackById } from '../../site.config';
+import { countQuestions } from '../../lib/inline';
+
+export async function getStaticPaths() {
+  const topics = (await getCollection('interview')).sort((a, b) => a.data.order - b.data.order);
+  return topics.map((topic, i) => ({
+    params: { slug: topic.id },
+    props: { topic, prev: topics[i - 1], next: topics[i + 1] },
+  }));
+}
+
+interface Props {
+  topic: CollectionEntry<'interview'>;
+  prev?: CollectionEntry<'interview'>;
+  next?: CollectionEntry<'interview'>;
+}
+const { topic, prev, next } = Astro.props;
+const track = trackById(topic.data.track);
+const { Content } = await render(topic);
+const count = countQuestions(topic.body);
+---
+
+<BaseLayout title={`${topic.data.title} Interview Questions`} description={topic.data.description}>
+  <div class="container page" style={`--accent:${track.accent}`} data-topic={topic.id}>
+    <div class="crumbs">
+      <a href="/interview/">Interview Q&amp;A</a>
+      <Icon name="chevron-right" size={14} />
+      <a href={`/interview/#${track.id}`}>{track.title}</a>
+    </div>
+    <h1>{topic.data.title}</h1>
+    <p class="lede">{topic.data.description}</p>
+
+    <div class="toolbar card">
+      <div class="seg" role="group" aria-label="Difficulty">
+        <button data-level="" aria-pressed="true">All <span>{count}</span></button>
+        <button data-level="easy" aria-pressed="false">Easy</button>
+        <button data-level="medium" aria-pressed="false">Medium</button>
+        <button data-level="hard" aria-pressed="false">Hard</button>
+      </div>
+      <label class="filter">
+        <Icon name="search" size={15} />
+        <input type="search" placeholder="Filter questions…" data-filter />
+      </label>
+      <div class="tb-actions">
+        <button class="btn btn-sm" data-hide-known aria-pressed="false"><Icon name="eye" size={14} /> Hide known</button>
+        <button class="btn btn-sm" data-expand>Expand all</button>
+      </div>
+    </div>
+    <div class="stats">
+      <span data-visible>{count}</span> shown · <span class="known-stat"><b data-known-total>0</b>/{count} known</span>
+      <div class="progress-bar"><span data-known-bar></span></div>
+    </div>
+
+    <div class="prose qa-list" data-pagefind-body data-pagefind-meta="section:Interview">
+      <span data-pagefind-filter="section" hidden>Interview</span>
+      <Content components={mdxComponents} />
+    </div>
+    <p class="empty" hidden>No questions match these filters.</p>
+
+    <AdSlot slot="inArticle" />
+
+    <nav class="pager">
+      {
+        prev ? (
+          <a class="card" href={`/interview/${prev.id}/`}>
+            <Icon name="arrow-left" size={14} /> {prev.data.title}
+          </a>
+        ) : (
+          <span />
+        )
+      }
+      {
+        next ? (
+          <a class="card next" href={`/interview/${next.id}/`}>
+            {next.data.title} <Icon name="arrow-right" size={14} />
+          </a>
+        ) : (
+          <a class="card next" href="/quiz/">
+            Take a quiz <Icon name="arrow-right" size={14} />
+          </a>
+        )
+      }
+    </nav>
+  </div>
+</BaseLayout>
+
+<script>
+  import { progress } from '../../scripts/progress';
+
+  const page = document.querySelector<HTMLElement>('[data-topic]')!;
+  const topic = page.dataset.topic!;
+  const items = [...document.querySelectorAll<HTMLDetailsElement>('[data-qa]')];
+  const levelBtns = [...document.querySelectorAll<HTMLButtonElement>('[data-level]')];
+  const filterInput = document.querySelector<HTMLInputElement>('[data-filter]')!;
+  const hideKnownBtn = document.querySelector<HTMLButtonElement>('[data-hide-known]')!;
+  const expandBtn = document.querySelector<HTMLButtonElement>('[data-expand]')!;
+  const empty = document.querySelector<HTMLElement>('.empty')!;
+  let level = '';
+  let hideKnown = false;
+
+  const keyOf = (d: HTMLElement) => `${topic}:${d.dataset.qaId}`;
+
+  function apply() {
+    const q = filterInput.value.trim().toLowerCase();
+    const known = new Set(progress.known());
+    let visible = 0;
+    let knownCount = 0;
+    for (const d of items) {
+      const isKnown = known.has(keyOf(d));
+      if (isKnown) knownCount++;
+      d.classList.toggle('known', isKnown);
+      const btn = d.querySelector<HTMLButtonElement>('[data-known]')!;
+      btn.setAttribute('aria-pressed', String(isKnown));
+      btn.querySelector('span')!.textContent = isKnown ? 'Known' : 'I know this';
+      const show =
+        (!level || d.dataset.level === level) &&
+        (!q || d.textContent!.toLowerCase().includes(q)) &&
+        !(hideKnown && isKnown);
+      d.hidden = !show;
+      if (show) visible++;
+    }
+    document.querySelector('[data-visible]')!.textContent = String(visible);
+    document.querySelector('[data-known-total]')!.textContent = String(knownCount);
+    document.querySelector<HTMLElement>('[data-known-bar]')!.style.width = `${(knownCount / items.length) * 100}%`;
+    empty.hidden = visible > 0;
+  }
+
+  levelBtns.forEach((b) =>
+    b.addEventListener('click', () => {
+      level = b.dataset.level!;
+      levelBtns.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      apply();
+    }),
+  );
+  filterInput.addEventListener('input', apply);
+  hideKnownBtn.addEventListener('click', () => {
+    hideKnown = !hideKnown;
+    hideKnownBtn.setAttribute('aria-pressed', String(hideKnown));
+    apply();
+  });
+  expandBtn.addEventListener('click', () => {
+    const open = !items.every((d) => d.open || d.hidden);
+    items.forEach((d) => !d.hidden && (d.open = open));
+    expandBtn.textContent = open ? 'Collapse all' : 'Expand all';
+  });
+  items.forEach((d) =>
+    d.querySelector('[data-known]')!.addEventListener('click', () => progress.toggleKnown(keyOf(d))),
+  );
+  window.addEventListener('jf:progress', apply);
+
+  // Open the question targeted by the URL hash
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (target instanceof HTMLDetailsElement) target.open = true;
+  apply();
+</script>
+
+<style>
+  .page {
+    max-width: 900px;
+    padding-top: 40px;
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .crumbs a {
+    color: var(--accent);
+    font-weight: 550;
+  }
+  h1 {
+    font-size: clamp(30px, 4.6vw, 44px);
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin: 0 0 12px;
+  }
+  .lede {
+    font-size: 17.5px;
+    color: var(--text-soft);
+    margin: 0 0 24px;
+  }
+  .toolbar {
+    position: sticky;
+    top: calc(var(--header-h) + 10px);
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  .seg {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 9px;
+    background: var(--surface-2);
+  }
+  .seg button {
+    padding: 5px 11px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font: 550 13px var(--font-sans);
+    cursor: pointer;
+  }
+  .seg button span {
+    opacity: 0.7;
+    margin-left: 2px;
+  }
+  .seg button[aria-pressed='true'] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .filter {
+    flex: 1;
+    min-width: 160px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .filter input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font: 14px var(--font-sans);
+  }
+  .tb-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin: 16px 2px 20px;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+  .known-stat b {
+    color: var(--ok);
+  }
+  .stats .progress-bar {
+    flex: 1;
+    min-width: 120px;
+    max-width: 240px;
+    margin-left: auto;
+  }
+  .qa-list > :global(.qa) {
+    margin-top: 10px;
+  }
+  .qa-list > :global(.qa[hidden]) {
+    display: none;
+  }
+  .qa-list > :global(h2) {
+    font-size: 1.15em;
+    border-top: 0;
+    margin-top: 2em;
+    padding-top: 0;
+    color: var(--accent);
+  }
+  .empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 40px 0;
+  }
+  .pager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 48px;
+  }
+  .pager a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 18px;
+    font-weight: 600;
+  }
+  .pager a:hover {
+    border-color: var(--accent);
+  }
+  .pager .next {
+    justify-content: flex-end;
+  }
+  @media (max-width: 640px) {
+    .tb-actions {
+      width: 100%;
+    }
+    .tb-actions .btn {
+      flex: 1;
+      justify-content: center;
+    }
+    .pager {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

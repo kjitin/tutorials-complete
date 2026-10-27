@@ -1,0 +1,349 @@
+---
+import { Code } from 'astro:components';
+import Icon from './Icon.astro';
+import { inline } from '../lib/inline';
+import type { Quiz } from '../data/quizzes/types';
+
+interface Props {
+  quiz: Quiz;
+}
+const { quiz } = Astro.props;
+const total = quiz.questions.length;
+---
+
+<div class="quiz" data-quiz={quiz.id} data-total={total}>
+  <section class="qz-start card" data-stage="start">
+    <div class="qz-start-icon"><Icon name="target" size={26} /></div>
+    <h2>{total} questions</h2>
+    <p>Pick an answer to see instantly whether you're right, with an explanation. Questions are shuffled every attempt.</p>
+    <p class="qz-best" data-best hidden></p>
+    <button class="btn btn-primary" data-start><Icon name="play" size={14} /> Start quiz</button>
+  </section>
+
+  <section class="qz-run" data-stage="run" hidden>
+    <div class="qz-head">
+      <span>Question <b data-qnum>1</b> of {total}</span>
+      <span class="qz-score">Score <b data-score>0</b></span>
+    </div>
+    <div class="progress-bar"><span data-qbar></span></div>
+
+    {
+      quiz.questions.map((item, i) => (
+        <article class="qz-q card" data-q={i} data-answer={item.answer} hidden>
+          <h3 set:html={inline(item.q)} />
+          {item.code && (
+            <div class="qz-code" data-no-copy>
+              <Code code={item.code.trim()} lang="java" themes={{ light: 'github-light', dark: 'github-dark-dimmed' }} defaultColor={false} />
+            </div>
+          )}
+          <div class="qz-opts" role="group">
+            {item.options.map((opt, oi) => (
+              <button type="button" class="qz-opt" data-opt={oi}>
+                <span class="qz-letter">{String.fromCharCode(65 + oi)}</span>
+                <span set:html={inline(opt)} />
+              </button>
+            ))}
+          </div>
+          <div class="qz-explain" hidden>
+            <strong class="qz-verdict" />
+            <p set:html={inline(item.explain)} />
+          </div>
+        </article>
+      ))
+    }
+
+    <div class="qz-nav">
+      <button class="btn btn-primary" data-next disabled>Next question <Icon name="arrow-right" size={14} /></button>
+    </div>
+  </section>
+
+  <section class="qz-result card" data-stage="result" hidden>
+    <div class="ring" data-ring><span data-pct>0%</span></div>
+    <h2 data-verdict>Nice work</h2>
+    <p>You scored <b data-final>0</b> out of {total}.</p>
+    <div class="qz-result-actions">
+      <button class="btn btn-primary" data-retry><Icon name="shuffle" size={14} /> Try again</button>
+      <a class="btn" href="/quiz/">All quizzes</a>
+      <a class="btn" href={`/${quiz.track}/`}>Review lessons</a>
+    </div>
+  </section>
+</div>
+
+<script>
+  import { progress } from '../scripts/progress';
+
+  document.querySelectorAll<HTMLElement>('[data-quiz]').forEach((root) => {
+    const id = root.dataset.quiz!;
+    const total = Number(root.dataset.total);
+    const stage = (name: string) =>
+      root.querySelectorAll<HTMLElement>('[data-stage]').forEach((s) => (s.hidden = s.dataset.stage !== name));
+    const questions = [...root.querySelectorAll<HTMLElement>('[data-q]')];
+    const nextBtn = root.querySelector<HTMLButtonElement>('[data-next]')!;
+    let order: number[] = [];
+    let pos = 0;
+    let score = 0;
+
+    const showBest = () => {
+      const best = progress.quizScores()[id];
+      const el = root.querySelector<HTMLElement>('[data-best]')!;
+      if (best) {
+        el.hidden = false;
+        el.textContent = `Your best: ${best.best}/${best.total} · last attempt: ${best.last}/${best.total}`;
+      }
+    };
+
+    function reset(q: HTMLElement) {
+      q.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => {
+        b.disabled = false;
+        b.className = 'qz-opt';
+      });
+      q.querySelector<HTMLElement>('.qz-explain')!.hidden = true;
+    }
+
+    function show() {
+      questions.forEach((q) => (q.hidden = true));
+      const q = questions[order[pos]];
+      reset(q);
+      q.hidden = false;
+      root.querySelector('[data-qnum]')!.textContent = String(pos + 1);
+      root.querySelector('[data-score]')!.textContent = String(score);
+      root.querySelector<HTMLElement>('[data-qbar]')!.style.width = `${(pos / total) * 100}%`;
+      nextBtn.disabled = true;
+      nextBtn.firstChild!.textContent = pos === total - 1 ? 'See results ' : 'Next question ';
+    }
+
+    function start() {
+      order = questions.map((_, i) => i).sort(() => Math.random() - 0.5);
+      pos = 0;
+      score = 0;
+      stage('run');
+      show();
+      root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    questions.forEach((q) => {
+      const answer = Number(q.dataset.answer);
+      q.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const chosen = Number(btn.dataset.opt);
+          const correct = chosen === answer;
+          if (correct) score++;
+          q.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => {
+            b.disabled = true;
+            const i = Number(b.dataset.opt);
+            if (i === answer) b.classList.add('correct');
+            else if (i === chosen) b.classList.add('wrong');
+          });
+          const ex = q.querySelector<HTMLElement>('.qz-explain')!;
+          ex.hidden = false;
+          ex.classList.toggle('is-correct', correct);
+          ex.querySelector('.qz-verdict')!.textContent = correct ? 'Correct!' : 'Not quite.';
+          root.querySelector('[data-score]')!.textContent = String(score);
+          nextBtn.disabled = false;
+          nextBtn.focus({ preventScroll: true });
+        }),
+      );
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (pos < total - 1) {
+        pos++;
+        show();
+        return;
+      }
+      progress.saveQuiz(id, score, total);
+      const pct = Math.round((score / total) * 100);
+      root.querySelector('[data-final]')!.textContent = String(score);
+      root.querySelector('[data-pct]')!.textContent = `${pct}%`;
+      root.querySelector<HTMLElement>('[data-ring]')!.style.setProperty('--pct', String(pct));
+      root.querySelector('[data-verdict]')!.textContent =
+        pct >= 90 ? 'Outstanding! 🏆' : pct >= 70 ? 'Great job!' : pct >= 50 ? 'Getting there' : 'Keep practising';
+      stage('result');
+    });
+
+    root.querySelector('[data-start]')!.addEventListener('click', start);
+    root.querySelector('[data-retry]')!.addEventListener('click', start);
+    showBest();
+  });
+</script>
+
+<style>
+  .quiz {
+    scroll-margin-top: calc(var(--header-h) + 20px);
+  }
+  .qz-start,
+  .qz-result {
+    padding: 40px 28px;
+    text-align: center;
+  }
+  .qz-start-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    margin-bottom: 12px;
+  }
+  .qz-start h2,
+  .qz-result h2 {
+    margin: 0 0 8px;
+    font-size: 26px;
+  }
+  .qz-start p,
+  .qz-result p {
+    color: var(--muted);
+    max-width: 480px;
+    margin: 0 auto 20px;
+  }
+  .qz-best {
+    color: var(--ok) !important;
+    font-weight: 550;
+  }
+  .qz-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .qz-head b {
+    color: var(--text);
+  }
+  .qz-q {
+    margin-top: 18px;
+    padding: 24px;
+  }
+  .qz-q h3 {
+    margin: 0 0 16px;
+    font-size: 18.5px;
+    line-height: 1.45;
+  }
+  .qz-q :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    padding: 0.1em 0.35em;
+    border-radius: 5px;
+    background: var(--surface-2);
+  }
+  .qz-q :global(pre code) {
+    padding: 0;
+    background: none;
+  }
+  .qz-code {
+    margin-bottom: 16px;
+  }
+  .qz-opts {
+    display: grid;
+    gap: 8px;
+  }
+  .qz-opt {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 14px;
+    text-align: left;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-soft);
+    font: 15px/1.5 var(--font-sans);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .qz-opt:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .qz-opt:disabled {
+    cursor: default;
+  }
+  .qz-letter {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    font: 600 12px var(--font-mono);
+  }
+  .qz-opt:global(.correct) {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 12%, var(--surface-2));
+    color: var(--text);
+  }
+  .qz-opt:global(.correct) .qz-letter {
+    background: var(--ok);
+    border-color: var(--ok);
+    color: #fff;
+  }
+  .qz-opt:global(.wrong) {
+    border-color: var(--err);
+    background: color-mix(in srgb, var(--err) 10%, var(--surface-2));
+  }
+  .qz-opt:global(.wrong) .qz-letter {
+    background: var(--err);
+    border-color: var(--err);
+    color: #fff;
+  }
+  .qz-explain {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border-left: 3px solid var(--err);
+    background: var(--surface-2);
+    font-size: 15px;
+  }
+  .qz-explain:global(.is-correct) {
+    border-left-color: var(--ok);
+  }
+  .qz-explain p {
+    margin: 4px 0 0;
+    color: var(--text-soft);
+  }
+  .qz-verdict {
+    color: var(--err);
+  }
+  .qz-explain:global(.is-correct) .qz-verdict {
+    color: var(--ok);
+  }
+  .qz-nav {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+  .qz-nav .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.5);
+  }
+  .ring {
+    --pct: 0;
+    width: 132px;
+    height: 132px;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(closest-side, var(--surface) 78%, transparent 79%),
+      conic-gradient(var(--brand-2) calc(var(--pct) * 1%), var(--surface-2) 0);
+  }
+  .ring span {
+    font-size: 28px;
+    font-weight: 750;
+  }
+  .qz-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+  }
+  [hidden] {
+    display: none !important;
+  }
+</style>
