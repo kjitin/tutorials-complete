@@ -61,7 +61,7 @@ Everything lives in `src/site.config.ts`:
 
 ## Deployment
 
-The site is hosted on Vercel at <https://stackwise-rosy.vercel.app>. The project is connected to this GitHub repo: every push to `main` deploys to production, and other branches and pull requests get preview URLs. `vercel.json` makes Vercel run `npm run build` so the Pagefind index is included.
+The site is hosted on Vercel at <https://tutorials.jitinkayyala.com> (also reachable at <https://stackwise-rosy.vercel.app>). The project is connected to this GitHub repo: every push to `main` deploys to production, and other branches and pull requests get preview URLs. `vercel.json` makes Vercel run `npm run build` so the Pagefind index is included.
 
 ## Progress tracking
 
