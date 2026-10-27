@@ -5,7 +5,7 @@ export const SITE = {
   tagline: 'Java, Spring Boot & Design Patterns — with code you can run.',
   description:
     'Learn modern Java 21, Spring Boot 4 and all 23 Gang of Four design patterns with runnable examples, UML diagrams, quizzes and 150+ interview questions.',
-  url: 'https://stackwise.vercel.app',
+  url: 'https://stackwise-rosy.vercel.app',
   author: 'StackWise',
   github: '',
 
