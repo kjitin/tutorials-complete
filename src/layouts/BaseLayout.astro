@@ -4,6 +4,7 @@ import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import SearchModal from '../components/SearchModal.astro';
 import Analytics from '../components/Analytics.astro';
+import ConsentBanner from '../components/ConsentBanner.astro';
 import { SITE } from '../site.config';
 
 interface Props {
@@ -71,6 +72,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
     </main>
     <Footer />
     <SearchModal />
+    <ConsentBanner />
     <script>
       import '../scripts/global.ts';
     </script>

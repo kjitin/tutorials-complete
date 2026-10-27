@@ -5,17 +5,63 @@ const { provider, ga4Id, plausibleDomain } = SITE.analytics;
 
 {
   provider === 'ga4' && ga4Id && (
-    <>
-      <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
-      <script is:inline define:vars={{ ga4Id }}>
-        window.dataLayer = window.dataLayer || [];
-        function gtag() {
-          dataLayer.push(arguments);
-        }
+    <script is:inline define:vars={{ ga4Id }}>
+      // Google Analytics only loads after the visitor accepts the consent banner
+      // (stored as 'granted' | 'denied' in localStorage under jf:consent).
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag('consent', 'default', {
+        analytics_storage: 'denied',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+      });
+
+      let loaded = false;
+      function load() {
+        if (loaded) return;
+        loaded = true;
+        gtag('consent', 'update', { analytics_storage: 'granted' });
         gtag('js', new Date());
-        gtag('config', ga4Id, { anonymize_ip: true });
-      </script>
-    </>
+        gtag('config', ga4Id);
+        const s = document.createElement('script');
+        s.async = true;
+        s.src = `https://www.googletagmanager.com/gtag/js?id=${ga4Id}`;
+        document.head.appendChild(s);
+      }
+
+      function read() {
+        try {
+          return localStorage.getItem('jf:consent');
+        } catch {
+          return null;
+        }
+      }
+
+      window.jfConsent = {
+        get: read,
+        set(value) {
+          try {
+            localStorage.setItem('jf:consent', value);
+          } catch {}
+          if (value === 'granted') return load();
+          gtag('consent', 'update', { analytics_storage: 'denied' });
+          // Remove any GA cookies set earlier (they live on the parent domain).
+          const host = location.hostname.split('.').slice(-2).join('.');
+          for (const c of document.cookie.split(';')) {
+            const name = c.split('=')[0].trim();
+            if (!name.startsWith('_ga')) continue;
+            for (const domain of ['', `; domain=.${host}`]) {
+              document.cookie = `${name}=; Max-Age=0; path=/${domain}`;
+            }
+          }
+        },
+      };
+
+      if (read() === 'granted') load();
+    </script>
   )
 }
 {

@@ -21,7 +21,16 @@ const year = new Date().getFullYear();
       <a href="/progress/">My progress</a>
     </div>
   </div>
-  <div class="container copy">© {year} {SITE.author}. Built for engineers preparing for their next role.</div>
+  <div class="container copy">
+    © {year} {SITE.author}. Built for engineers preparing for their next role.
+    {
+      SITE.analytics.provider === 'ga4' && (
+        <button type="button" class="cookie-link" onclick="document.dispatchEvent(new Event('jf:consent-open'))">
+          Cookie settings
+        </button>
+      )
+    }
+  </div>
 </footer>
 
 <style>
@@ -71,6 +80,19 @@ const year = new Date().getFullYear();
     border-top: 1px solid var(--border);
     color: var(--muted);
     font-size: 13px;
+  }
+  .cookie-link {
+    margin-left: 12px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-soft);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .cookie-link:hover {
+    color: var(--text);
   }
   @media (max-width: 720px) {
     .grid {

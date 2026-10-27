@@ -1,0 +1,81 @@
+---
+import { SITE } from '../site.config';
+const { provider, ga4Id } = SITE.analytics;
+const enabled = provider === 'ga4' && !!ga4Id;
+---
+
+{
+  enabled && (
+    <div class="consent" role="region" aria-label="Cookie consent" data-consent hidden>
+      <p>
+        We'd like to use Google Analytics cookies to understand which lessons are useful. They're only set if you
+        accept. Your learning progress stays in your browser either way.
+      </p>
+      <div class="actions">
+        <button type="button" class="btn btn-sm" data-choice="denied">Reject</button>
+        <button type="button" class="btn btn-sm btn-primary" data-choice="granted">Accept</button>
+      </div>
+    </div>
+  )
+}
+
+<script>
+  const banner = document.querySelector<HTMLElement>('[data-consent]');
+  const consent = (window as any).jfConsent;
+  if (banner && consent) {
+    if (!consent.get()) banner.hidden = false;
+    banner.querySelectorAll<HTMLButtonElement>('[data-choice]').forEach((b) =>
+      b.addEventListener('click', () => {
+        consent.set(b.dataset.choice);
+        banner.hidden = true;
+      }),
+    );
+    document.addEventListener('jf:consent-open', () => {
+      banner.hidden = false;
+      banner.querySelector<HTMLButtonElement>('[data-choice="granted"]')?.focus();
+    });
+  }
+</script>
+
+<style>
+  .consent {
+    position: fixed;
+    z-index: 60;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: 560px;
+    margin-left: auto;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: var(--glow);
+    font-size: 14px;
+    color: var(--text-soft);
+  }
+  .consent[hidden] {
+    display: none;
+  }
+  p {
+    margin: 0;
+    flex: 1;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  @media (max-width: 560px) {
+    .consent {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .actions > * {
+      flex: 1;
+    }
+  }
+</style>

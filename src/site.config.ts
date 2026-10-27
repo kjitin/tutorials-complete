@@ -11,8 +11,8 @@ export const SITE = {
 
   // Analytics: 'none' | 'ga4' | 'plausible'
   analytics: {
-    provider: 'none' as 'none' | 'ga4' | 'plausible',
-    ga4Id: '', // e.g. 'G-XXXXXXXXXX'
+    provider: 'ga4' as 'none' | 'ga4' | 'plausible',
+    ga4Id: 'G-MLKMSJBX26', // shared with jitinkayyala.com; filter reports by hostname
     plausibleDomain: '', // e.g. 'stackwise.dev'
   },
 
