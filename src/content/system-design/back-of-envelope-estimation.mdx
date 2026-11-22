@@ -1,0 +1,91 @@
+---
+title: Back-of-Envelope Estimation
+description: The numbers every engineer should know, powers of two, and a step-by-step method for turning DAU into QPS, storage and bandwidth in under five minutes.
+group: Foundations
+order: 2
+level: beginner
+tags: [estimation, numbers]
+---
+
+## Why estimate?
+
+Estimates decide the **shape** of the design. 50 writes per second fits on one database with room to spare; 500,000 writes per second means partitioning, batching and probably a log-structured store. Interviewers don't care whether you say 11,574 or 12,000 — they care that you land within the right **order of magnitude** and use it to make a decision.
+
+## Shortcuts that make the maths easy
+
+| Fact | Value | Use it as |
+| --- | --- | --- |
+| Seconds per day | 86,400 | **~100,000** (10⁵) |
+| Seconds per month | ~2.6 M | ~2.5 × 10⁶ |
+| Seconds per year | ~31.5 M | ~3 × 10⁷ |
+| 1 million requests/day | ~11.6 QPS | **~10 QPS** |
+| Peak traffic | — | **2–3×** the average |
+
+So: **QPS ≈ daily requests ÷ 10⁵**. 100M DAU × 10 requests each = 10⁹/day → ~10,000 QPS average, ~25,000 at peak.
+
+## Powers of two (storage units)
+
+| Power | Exact | Approx | Name |
+| --- | --- | --- | --- |
+| 2¹⁰ | 1,024 | 10³ | 1 KB |
+| 2²⁰ | ~1.05 M | 10⁶ | 1 MB |
+| 2³⁰ | ~1.07 B | 10⁹ | 1 GB |
+| 2⁴⁰ | ~1.1 T | 10¹² | 1 TB |
+| 2⁵⁰ | ~1.13 × 10¹⁵ | 10¹⁵ | 1 PB |
+
+## Latency numbers worth memorising
+
+Rounded, modern-hardware values. The ratios matter more than the exact figures.
+
+| Operation | Time |
+| --- | --- |
+| L1 cache reference | ~1 ns |
+| Main memory reference | ~100 ns |
+| Compress 1 KB (fast codec) | ~2 µs |
+| Read 1 MB sequentially from memory | ~10 µs |
+| Round trip within a data centre | ~0.5 ms |
+| Random read from NVMe SSD | ~100 µs |
+| Read 1 MB sequentially from SSD | ~0.5 ms |
+| Disk (HDD) seek | ~10 ms |
+| Round trip US ↔ Europe | ~80–150 ms |
+
+**Takeaways:** memory is ~1,000× faster than a network hop; a cross-continent round trip costs as much as thousands of in-DC calls; avoid HDD seeks on the hot path.
+
+## Rough capacity of one box
+
+Treat these as conversation starters, not benchmarks — real numbers depend heavily on query shape and hardware.
+
+| Component | Order of magnitude |
+| --- | --- |
+| Stateless app server (simple JSON API) | 1K–10K req/s |
+| Relational DB primary (simple indexed queries) | ~10K reads/s, a few K writes/s |
+| Redis / Memcached node | ~100K ops/s |
+| Kafka partition | ~10 MB/s write throughput |
+
+## The method
+
+1. **Users → requests.** DAU × actions per user per day = requests/day.
+2. **Requests → QPS.** Divide by 10⁵. Multiply by 2–3 for peak. Split reads vs writes.
+3. **Writes → storage.** Writes/day × bytes per record × retention days. Add replication (×3).
+4. **QPS → bandwidth.** QPS × average payload size.
+5. **Derive hardware.** Peak QPS ÷ per-node capacity = rough node count; working set vs RAM tells you whether caching is viable.
+
+### Worked example: a photo-sharing app
+
+- 50M DAU, each uploads 0.2 photos/day and views 50 photos/day.
+- **Uploads:** 50M × 0.2 = 10M/day → **~100 writes/s** (peak ~300).
+- **Views:** 50M × 50 = 2.5B/day → **~25,000 reads/s** (peak ~75,000). Read:write ≈ 250:1 → cache and CDN everything.
+- **Storage:** 10M photos × 2 MB = 20 TB/day → **~7 PB/year** before replication. Object storage, not a database.
+- **Egress:** 25,000 views/s × 200 KB (thumbnail-sized) = **5 GB/s** — this is why a CDN is non-negotiable.
+
+<Callout type="tip" title="Say the units out loud">
+Write units next to every number ("10M photos/day × 2 MB/photo = 20 TB/day"). It catches the most common mistake — mixing per-second and per-day figures — and makes your working easy to follow.
+</Callout>
+
+<Callout type="interview">
+Round aggressively and **state your rounding**: "86,400 seconds, call it 100K". Interviewers reward speed and sanity checks ("7 PB a year — that's object storage territory") far more than arithmetic precision.
+</Callout>
+
+## Practise
+
+Put this into muscle memory with the timed [Napkin Math speed round](/quiz/napkin-math/): answers within 2× count, within 1.25× is a bullseye, and fast answers earn bonus XP.

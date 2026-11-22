@@ -1,4 +1,5 @@
-// Site-wide behaviour: theme toggle, copy buttons, mobile nav, Mermaid diagrams.
+// Site-wide behaviour: theme toggle, copy buttons, mobile nav, Mermaid diagrams, XP toasts.
+import { gameEnabled, markSeen, snapshot, type Snapshot } from './game';
 
 type Theme = 'dark' | 'light';
 const root = document.documentElement;
@@ -118,4 +119,70 @@ if (sources.length) {
     render();
     window.addEventListener('jf:theme', render);
   });
+}
+
+// Gamification: header XP pill + toasts for XP gains, level-ups and new badges.
+
+const pill = document.querySelector<HTMLElement>('[data-xp-pill]');
+let toastBox: HTMLElement | null = null;
+
+function toast(html: string, cls = '') {
+  if (!toastBox) {
+    toastBox = document.createElement('div');
+    toastBox.className = 'toasts';
+    toastBox.setAttribute('role', 'status');
+    toastBox.setAttribute('aria-live', 'polite');
+    document.body.appendChild(toastBox);
+  }
+  const el = document.createElement('div');
+  el.className = `toast ${cls}`;
+  el.innerHTML = html;
+  toastBox.appendChild(el);
+  setTimeout(() => el.classList.add('out'), 3600);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function paintPill(s: Snapshot) {
+  if (!pill) return;
+  pill.hidden = false;
+  pill.querySelector('[data-xp-lv]')!.textContent = `Lv ${s.level.index}`;
+  pill.querySelector('[data-xp-num]')!.textContent = s.xp.toLocaleString();
+  pill.title = `${s.level.name} · ${s.xp} XP${s.next ? ` · ${s.next.xp - s.xp} XP to ${s.next.name}` : ''}`;
+  const streak = pill.querySelector<HTMLElement>('[data-xp-streak]')!;
+  streak.hidden = s.streak.current < 2;
+  streak.querySelector('b')!.textContent = String(s.streak.current);
+}
+
+let last = snapshot();
+// Badges earned before this page loaded are shown on /progress, not toasted.
+markSeen(last.badges.filter((b) => b.earned).map((b) => b.id));
+paintPill(last);
+
+// Several writes can happen in one interaction (e.g. quiz XP + score + today's streak);
+// coalesce them so the learner sees one combined toast.
+let pending = false;
+window.addEventListener('jf:progress', () => {
+  if (pending) return;
+  pending = true;
+  setTimeout(() => {
+    pending = false;
+    onProgress();
+  }, 0);
+});
+
+function onProgress() {
+  const now = snapshot();
+  paintPill(now);
+  if (gameEnabled()) {
+    const gained = now.xp - last.xp;
+    if (gained > 0) toast(`<span class="t-emoji">✨</span><span><b>+${gained} XP</b></span>`, 'xp');
+    if (now.level.index > last.level.index)
+      toast(`<span class="t-emoji">🚀</span><span>Promoted to <b>${now.level.name}</b><small>Level ${now.level.index}</small></span>`);
+    const fresh = now.badges.filter((b) => b.earned && !now.seen.includes(b.id));
+    fresh.forEach((b) =>
+      toast(`<span class="t-emoji">${b.emoji}</span><span>Badge unlocked: <b>${b.name}</b><small>${b.desc}</small></span>`),
+    );
+    if (fresh.length) markSeen(fresh.map((b) => b.id));
+  }
+  last = now;
 }

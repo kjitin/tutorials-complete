@@ -19,12 +19,13 @@ export const collections = {
   java: lessonCollection('java'),
   'spring-boot': lessonCollection('spring-boot'),
   'design-patterns': lessonCollection('design-patterns'),
+  'system-design': lessonCollection('system-design'),
   interview: defineCollection({
     loader: glob({ pattern: '**/*.mdx', base: './src/content/interview' }),
     schema: z.object({
       title: z.string(),
       description: z.string(),
-      track: z.enum(['java', 'spring-boot', 'design-patterns']),
+      track: z.enum(['java', 'spring-boot', 'design-patterns', 'system-design']),
       order: z.number(),
     }),
   }),

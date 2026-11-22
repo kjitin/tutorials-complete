@@ -1,0 +1,108 @@
+---
+title: System Design
+description: Scalability, caching, databases, consistency, queues and the classic design prompts — with the trade-offs interviewers expect you to name.
+track: system-design
+order: 20
+---
+
+## Fundamentals
+
+<QA q="How do you structure a 45-minute system design interview?" level="easy">
+
+Requirements (~5 min: functional + non-functional, descope explicitly) → estimates (~5 min: QPS, storage, bandwidth) → API and data model (~5 min) → high-level design of the happy path (~15 min) → deep dive on 1–2 hard parts (~10 min) → wrap-up with trade-offs and next steps. State the plan up front and keep an eye on the clock. See [the framework lesson](/system-design/interview-framework/).
+
+</QA>
+
+<QA q="What's the difference between latency and throughput, and how are they related?" level="easy">
+
+Latency is the time for one request; throughput is requests completed per second. **Little's Law** links them: in-flight requests = throughput × latency. If a dependency slows down, each request holds a thread longer, so the same throughput needs more concurrency — which is how one slow service exhausts another's thread pool.
+
+</QA>
+
+<QA q="Why do we measure p99 latency instead of the average?" level="medium">
+
+Averages hide the tail. A user's page often makes many backend calls, and the slowest one determines page latency: with 20 calls, ~18% of page loads hit at least one call's p99. Optimising p99 (and p99.9 on critical paths) improves what users actually experience.
+
+</QA>
+
+<QA q="Explain the CAP theorem. Why is PACELC more useful?" level="medium">
+
+During a network **partition**, a distributed store must choose **consistency** (reject or block some requests) or **availability** (answer everything, possibly stale). Partitions are unavoidable, so it's really C vs A *during failures*. **PACELC** adds the everyday case: *else*, choose **latency** or **consistency** — wait for replicas to confirm, or read the nearest copy. That second trade-off drives most real design decisions.
+
+</QA>
+
+<QA q="Vertical vs horizontal scaling — what are the trade-offs?" level="easy">
+
+Vertical (bigger box) is simple and avoids distribution problems, but has a hard ceiling and is a single point of failure. Horizontal (more boxes) scales nearly without limit and survives failures, but requires stateless services, load balancing and — for data — replication and partitioning. Typical answer: stateless app tier scaled horizontally; data tier scaled vertically first, then with replicas and shards.
+
+</QA>
+
+## Building blocks
+
+<QA q="Cache-aside vs write-through vs write-behind?" level="medium">
+
+**Cache-aside**: app reads cache, on miss loads from DB and populates; on write updates DB and deletes the key. Default choice. **Write-through**: write cache and DB synchronously — fresh reads, slower writes. **Write-behind**: write the cache, flush to the DB asynchronously — fastest writes, but risk losing data if the cache fails before flushing. See [Caching Strategies](/system-design/caching/).
+
+</QA>
+
+<QA q="What is a cache stampede and how do you prevent it?" level="hard">
+
+When a hot key expires, many concurrent requests miss simultaneously and all hit the database. Fixes: **request coalescing** (one request rebuilds per key while others wait — a "single-flight" lock), **stale-while-revalidate** (serve the old value while one request refreshes), **probabilistic early refresh** before expiry, and **TTL jitter** so related keys don't expire together.
+
+</QA>
+
+<QA q="How does consistent hashing work and why is it used?" level="medium">
+
+Nodes and keys are hashed onto a ring; each key belongs to the next node clockwise. Adding or removing a node moves only the keys in its arc (~1/N of the data) instead of reshuffling almost everything as `hash mod N` does. **Virtual nodes** (many points per physical node) even out the load and spread a failed node's keys across many survivors.
+
+</QA>
+
+<QA q="How do you choose a shard key?" level="hard">
+
+High cardinality, even load, and alignment with the dominant query so most requests hit **one shard**. Avoid monotonically increasing keys (timestamps) with range sharding — all writes land on the last shard — and low-cardinality keys (country). Example: shard chat messages by `conversation_id`, not `message_id`. Plan for hot keys (celebrity accounts) separately.
+
+</QA>
+
+<QA q="What is replication lag and how do you handle read-your-writes?" level="medium">
+
+With asynchronous leader-follower replication, followers trail the leader, so a user may not see their own just-written data when reading from a replica. Handle it by reading from the leader for a short window after a user writes, routing by the last-written log position, or pinning a user's reads to one replica (monotonic reads).
+
+</QA>
+
+<QA q="At-least-once vs exactly-once delivery — how do you get 'exactly once' in practice?" level="hard">
+
+Networks force a choice between possibly losing messages (at-most-once) and possibly duplicating them (at-least-once). "Exactly once" is achieved as **at-least-once delivery + idempotent processing**: dedupe by message ID or idempotency key in the same transaction as the side effect, prefer absolute updates over increments, and use upserts.
+
+</QA>
+
+<QA q="What problem does the transactional outbox pattern solve?" level="hard">
+
+The **dual write**: saving to the database and publishing to a broker are two systems, and a crash between them leaves them inconsistent. With an outbox, the event row is inserted in the **same DB transaction** as the business data; a separate relay (polling or CDC like Debezium) publishes outbox rows. Delivery becomes at-least-once, so consumers stay idempotent.
+
+</QA>
+
+## Classic prompts
+
+<QA q="Design a URL shortener: how do you generate unique short codes at scale?" level="medium">
+
+Base62-encode a unique numeric ID: 7 characters give ~3.5 trillion codes. Each write server **leases a range** of IDs from a coordinator (DB sequence, ZooKeeper, Redis `INCRBY`), so there's no per-request coordination and no collision checks. Permute the ID (e.g. a Feistel cipher) if sequential codes must not be guessable. Cache redirects heavily; use 302 if you need click analytics. See [the case study](/system-design/url-shortener/).
+
+</QA>
+
+<QA q="Token bucket vs sliding window for rate limiting?" level="medium">
+
+**Token bucket** refills at rate *r* up to capacity *B*; it allows bursts up to *B* and needs only two values of state. **Sliding window counter** weights the previous window's count by how much of it overlaps the last 60 s — smooth, near-exact, two counters. Fixed windows are simplest but allow 2× bursts at boundaries. In a distributed limiter, do the check atomically in Redis with a Lua script.
+
+</QA>
+
+<QA q="News feed: fan-out on write or fan-out on read?" level="hard">
+
+Push (fan-out on write) precomputes each follower's timeline so reads are fast, but a celebrity post means millions of writes. Pull (fan-out on read) keeps writes cheap but makes reads slow. Use a **hybrid**: push for normal accounts, pull celebrity posts at read time and merge, and skip pushing to inactive users. See [the case study](/system-design/news-feed/).
+
+</QA>
+
+<QA q="Chat system: how does a message reach a user connected to a different server?" level="hard">
+
+Clients hold WebSockets to gateway servers; a **session registry** (e.g. Redis) maps user → gateway. The chat service persists the message (assigning a per-conversation sequence number), acknowledges the sender, looks up the recipient's gateway and forwards it — or sends a push notification if they're offline. Devices sync on reconnect by asking for everything after their last-seen sequence.
+
+</QA>

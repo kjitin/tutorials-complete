@@ -1,7 +1,11 @@
 import { getCollection, type CollectionEntry } from 'astro:content';
 import { trackById, type TrackId } from '../site.config';
 
-export type Lesson = CollectionEntry<'java'> | CollectionEntry<'spring-boot'> | CollectionEntry<'design-patterns'>;
+export type Lesson =
+  | CollectionEntry<'java'>
+  | CollectionEntry<'spring-boot'>
+  | CollectionEntry<'design-patterns'>
+  | CollectionEntry<'system-design'>;
 
 export async function getLessons(track: TrackId): Promise<Lesson[]> {
   const groups = trackById(track).groups;

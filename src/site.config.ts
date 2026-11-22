@@ -2,9 +2,9 @@
 // code runner here without touching any component.
 export const SITE = {
   name: 'StackWise',
-  tagline: 'Java, Spring Boot & Design Patterns — with code you can run.',
+  tagline: 'Java, Spring Boot, Design Patterns & System Design — with code you can run.',
   description:
-    'Learn modern Java 21, Spring Boot 4 and all 23 Gang of Four design patterns with runnable examples, UML diagrams, quizzes and 150+ interview questions.',
+    'Learn modern Java 21, Spring Boot 4, all 23 Gang of Four design patterns and system design with runnable examples, UML diagrams, gamified quizzes and 150+ interview questions.',
   url: 'https://tutorials.jitinkayyala.com',
   author: 'StackWise',
   github: '',
@@ -32,7 +32,7 @@ export const SITE = {
   },
 } as const;
 
-export type TrackId = 'java' | 'spring-boot' | 'design-patterns';
+export type TrackId = 'java' | 'spring-boot' | 'design-patterns' | 'system-design';
 
 export interface Track {
   id: TrackId;
@@ -74,6 +74,16 @@ export const TRACKS: Track[] = [
     accent: '#a855f7',
     icon: 'shapes',
     groups: ['Principles', 'Creational', 'Structural', 'Behavioral'],
+  },
+  {
+    id: 'system-design',
+    title: 'System Design',
+    short: 'System Design',
+    description:
+      'A repeatable interview framework, napkin math, the core building blocks and classic case studies — with estimation drills and trade-off duels to practise.',
+    accent: '#0ea5e9',
+    icon: 'server',
+    groups: ['Foundations', 'Building Blocks', 'Case Studies'],
   },
 ];
 

@@ -18,7 +18,12 @@ const KEYS = {
   bookmarks: 'jf:bookmarks',
   quiz: 'jf:quiz',
   known: 'jf:known',
+  days: 'jf:days', // active days (YYYY-MM-DD) for streaks
+  game: 'jf:game', // gamification stats, see game.ts
 } as const;
+
+export const today = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -32,11 +37,18 @@ function read<T>(key: string, fallback: T): T {
 function write(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    // Any learning activity counts towards today's streak (keep the last 400 days).
+    const days = read<string[]>(KEYS.days, []);
+    const d = today();
+    if (!days.includes(d)) localStorage.setItem(KEYS.days, JSON.stringify([...days, d].slice(-400)));
   } catch {
     /* storage unavailable — progress just won't persist */
   }
   window.dispatchEvent(new CustomEvent('jf:progress'));
 }
+
+// Shared low-level access for game.ts, so all keys live (and reset) in one place.
+export const store = { read, write, KEYS };
 
 function toggleIn(key: string, id: string): boolean {
   const list = read<string[]>(key, []);
@@ -68,6 +80,7 @@ export const progress = {
   },
 
   known: () => read<string[]>(KEYS.known, []),
+  days: () => read<string[]>(KEYS.days, []),
   toggleKnown: (id: string) => toggleIn(KEYS.known, id),
 
   reset() {
