@@ -6,7 +6,8 @@ const path = Astro.url.pathname;
 const links = [
   { href: '/java/', label: 'Java' },
   { href: '/spring-boot/', label: 'Spring Boot' },
-  { href: '/design-patterns/', label: 'Design Patterns' },
+  { href: '/design-patterns/', label: 'Patterns' },
+  { href: '/system-design/', label: 'System Design' },
   { href: '/interview/', label: 'Interview Q&A' },
   { href: '/quiz/', label: 'Quizzes' },
 ];
@@ -58,6 +59,11 @@ const active = (href: string) => path.startsWith(href);
         <span class="desktop-only">Search</span>
         <kbd class="desktop-only" data-search-kbd>⌘K</kbd>
       </button>
+      <a href="/progress/#level" class="xp-pill" data-xp-pill hidden title="Your level and XP">
+        <span class="xp-lv" data-xp-lv>Lv 1</span>
+        <span class="xp-num"><b data-xp-num>0</b> XP</span>
+        <span class="xp-streak" data-xp-streak hidden><Icon name="flame" size={13} /><b></b></span>
+      </a>
       <a href="/progress/" class="icon-btn" aria-label="My progress" title="My progress">
         <Icon name="chart" size={18} />
       </a>
@@ -246,12 +252,69 @@ const active = (href: string) => path.startsWith(href);
     color: var(--text);
   }
 
+  .xp-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px 0 4px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    transition: border-color 0.15s;
+  }
+  .xp-pill:hover {
+    border-color: var(--border-strong);
+  }
+  .xp-pill[hidden],
+  :global(html[data-game-off]) .xp-pill {
+    display: none;
+  }
+  .xp-lv {
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--gradient);
+    color: #fff;
+    font-weight: 700;
+    font-size: 11.5px;
+  }
+  .xp-num b {
+    color: var(--text);
+  }
+  .xp-streak {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: #f97316;
+  }
+  .xp-streak[hidden] {
+    display: none;
+  }
   .mobile-only {
     display: none;
   }
-  @media (max-width: 960px) {
+  @media (max-width: 1180px) {
+    .xp-num {
+      display: none;
+    }
+  }
+  @media (max-width: 1060px) {
     .desktop-only {
       display: none;
+    }
+    .xp-num {
+      display: inline;
+    }
+  }
+  @media (max-width: 520px) {
+    .xp-num {
+      display: none;
+    }
+    .xp-pill {
+      padding-right: 4px;
     }
     .mobile-only {
       display: grid;

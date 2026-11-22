@@ -7,12 +7,15 @@ import { TRACKS } from '../../site.config';
 const total = QUIZZES.reduce((s, q) => s + q.questions.length, 0);
 ---
 
-<BaseLayout title="Quizzes" description={`${total} multiple-choice questions on Java, Spring Boot and design patterns with instant explanations.`}>
+<BaseLayout title="Quizzes" description={`${total} quiz questions on Java, Spring Boot, design patterns and system design — multiple choice, estimation speed rounds and trade-off duels.`}>
   <section class="hero bg-grid">
     <div class="container">
       <span class="eyebrow">Practice</span>
       <h1>Test what you know.<br /><span class="gradient-text">{total} questions, instant feedback.</span></h1>
-      <p>Each quiz shuffles its questions and explains every answer. Your best score is saved in this browser.</p>
+      <p>
+        Multiple choice, timed estimation rounds and trade-off duels. Every answer is explained, and each attempt earns XP towards
+        your <a href="/progress/#level">engineer level</a>.
+      </p>
     </div>
   </section>
   <div class="container grid">
@@ -25,7 +28,10 @@ const total = QUIZZES.reduce((s, q) => s + q.questions.length, 0);
               <span class="qc-icon">
                 <Icon name={track.icon} size={18} />
               </span>
-              <span class="chip">{quiz.questions.length} questions</span>
+              <span class="qc-chips">
+                {quiz.mode && <span class="chip mode">{quiz.mode}</span>}
+                <span class="chip">{quiz.questions.length} questions</span>
+              </span>
             </span>
             <span class="qc-title">{quiz.title}</span>
             <span class="qc-desc">{quiz.description}</span>
@@ -99,6 +105,17 @@ const total = QUIZZES.reduce((s, q) => s + q.questions.length, 0);
     border-radius: 10px;
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .qc-chips {
+    display: flex;
+    gap: 6px;
+  }
+  .chip.mode {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .hero p a {
+    color: var(--brand);
   }
   .qc-title {
     font-weight: 650;

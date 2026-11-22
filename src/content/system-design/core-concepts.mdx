@@ -1,0 +1,72 @@
+---
+title: 'Core Concepts: Latency, Availability & CAP'
+description: Latency vs throughput, percentiles, availability nines, SLIs/SLOs, vertical vs horizontal scaling, and the CAP and PACELC theorems in practical terms.
+group: Foundations
+order: 3
+level: intermediate
+tags: [availability, cap, latency, scalability]
+---
+
+## Latency vs throughput
+
+- **Latency** — how long one request takes.
+- **Throughput** — how many requests the system completes per unit of time.
+
+They're linked by **Little's Law**: *concurrency = throughput × latency*. A service doing 1,000 req/s at 200 ms average latency has ~200 requests in flight. If latency doubles under load, you need twice the concurrency (threads, connections) to keep the same throughput — which is how slow dependencies exhaust thread pools.
+
+### Measure percentiles, not averages
+
+Averages hide the slow tail. Track **p50, p95, p99** (and p99.9 for critical paths). If a page makes 20 backend calls, the chance at least one hits that call's p99 is 1 − 0.99²⁰ ≈ **18%** — tail latency becomes typical latency at fan-out.
+
+## Availability and the nines
+
+| Availability | Downtime per year | Per month |
+| --- | --- | --- |
+| 99% (two nines) | ~3.65 days | ~7.3 h |
+| 99.9% | ~8.8 h | ~43 min |
+| 99.99% | ~53 min | ~4.3 min |
+| 99.999% | ~5.3 min | ~26 s |
+
+**Components in series multiply**: three services at 99.9% each give ~99.7% overall. **Redundant components in parallel** fail only if all fail: two independent 99% replicas give 1 − 0.01² = 99.99%. That's the maths behind "remove single points of failure".
+
+### SLI, SLO, SLA
+
+- **SLI** — a measured indicator (e.g. % of requests under 300 ms).
+- **SLO** — your internal target for it (99.9% over 30 days). The gap to 100% is your **error budget**.
+- **SLA** — a contractual promise to customers, with penalties. Always looser than the SLO.
+
+## Scaling up vs scaling out
+
+| | Vertical (scale up) | Horizontal (scale out) |
+| --- | --- | --- |
+| How | Bigger machine | More machines |
+| Pros | Simple, no distribution problems | Near-unlimited, fault tolerant |
+| Cons | Hard ceiling, single point of failure | Needs stateless design, load balancing, partitioning |
+
+The usual answer: keep **services stateless** so they scale out trivially, and push state into purpose-built stores that you scale deliberately (replication, sharding).
+
+## CAP theorem
+
+In the presence of a **network Partition**, a distributed data store must choose between **Consistency** (every read sees the latest write) and **Availability** (every request gets a non-error response).
+
+- **CP** — refuse or block requests on the minority side to stay consistent. Examples: ZooKeeper, etcd, HBase, a single-leader SQL database with synchronous failover.
+- **AP** — keep answering on both sides and reconcile later. Examples: Cassandra, DynamoDB (default), DNS.
+
+Partitions aren't optional on real networks, so "CA" isn't a real choice for distributed systems.
+
+### PACELC — the more useful version
+
+**If Partition**: choose **A** or **C**. **Else** (normal operation): choose **Latency** or **Consistency**. Most of the time there's no partition, and the real trade-off is: do you wait for replicas to acknowledge (consistent, slower) or answer from the nearest copy (fast, possibly stale)?
+
+## Consistency models, briefly
+
+| Model | Guarantee | Typical use |
+| --- | --- | --- |
+| Strong / linearisable | Reads see the latest committed write | Balances, inventory, locks |
+| Read-your-writes | You see your own writes | Profile edits, posts |
+| Monotonic reads | You never go back in time | Feeds, timelines |
+| Eventual | Replicas converge if writes stop | Like counts, view counts, recommendations |
+
+<Callout type="interview">
+Don't pick one consistency model for the whole system. Say which **data** needs which guarantee: "Payments need strong consistency; like counts can be eventual and cached for 30 seconds." That per-data reasoning is exactly what interviewers look for.
+</Callout>

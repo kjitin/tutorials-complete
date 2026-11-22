@@ -5,7 +5,9 @@ import Footer from '../components/Footer.astro';
 import SearchModal from '../components/SearchModal.astro';
 import Analytics from '../components/Analytics.astro';
 import ConsentBanner from '../components/ConsentBanner.astro';
-import { SITE } from '../site.config';
+import { SITE, TRACKS } from '../site.config';
+import { getLessons } from '../lib/lessons';
+import { QUIZZES } from '../data/quizzes';
 
 interface Props {
   title?: string;
@@ -14,6 +16,13 @@ interface Props {
 }
 const { title, description = SITE.description, type = 'website' } = Astro.props;
 const fullTitle = title ? `${title} | ${SITE.name}` : `${SITE.name} — ${SITE.tagline}`;
+// Build-time facts the gamification script needs (see scripts/game.ts).
+const facts = {
+  tracks: Object.fromEntries(
+    await Promise.all(TRACKS.map(async (t) => [t.id, { title: t.title, total: (await getLessons(t.id)).length }])),
+  ),
+  quizzes: QUIZZES.map((q) => q.id),
+};
 const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
 ---
 
@@ -28,6 +37,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
     <meta name="theme-color" content="#0a0c10" />
+    <meta name="sw-facts" content={JSON.stringify(facts)} />
     <meta property="og:type" content={type} />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
@@ -47,6 +57,9 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
           t = localStorage.getItem('jf:theme') || 'dark';
         } catch (e) {}
         document.documentElement.dataset.theme = t;
+        try {
+          if (localStorage.getItem('jf:game-off') === '1') document.documentElement.setAttribute('data-game-off', '');
+        } catch (e) {}
       })();
     </script>
     {

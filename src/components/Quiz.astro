@@ -9,13 +9,19 @@ interface Props {
 }
 const { quiz } = Astro.props;
 const total = quiz.questions.length;
+const kinds = new Set(quiz.questions.map((q) => q.type ?? 'mcq'));
+const intro = kinds.has('estimate')
+  ? 'Type your estimate — any unit suffix works (1.5k, 2M, 3e9). Within 2× of the reference counts; within 1.25× is a bullseye. Answer fast for bonus XP.'
+  : kinds.has('tradeoff')
+    ? 'Pick a side and every reason that justifies it. You only win the duel with the right call and the right reasoning.'
+    : "Pick an answer to see instantly whether you're right, with an explanation. Questions are shuffled every attempt.";
 ---
 
 <div class="quiz" data-quiz={quiz.id} data-total={total}>
   <section class="qz-start card" data-stage="start">
     <div class="qz-start-icon"><Icon name="target" size={26} /></div>
     <h2>{total} questions</h2>
-    <p>Pick an answer to see instantly whether you're right, with an explanation. Questions are shuffled every attempt.</p>
+    <p>{intro}</p>
     <p class="qz-best" data-best hidden></p>
     <button class="btn btn-primary" data-start><Icon name="play" size={14} /> Start quiz</button>
   </section>
@@ -23,29 +29,96 @@ const total = quiz.questions.length;
   <section class="qz-run" data-stage="run" hidden>
     <div class="qz-head">
       <span>Question <b data-qnum>1</b> of {total}</span>
-      <span class="qz-score">Score <b data-score>0</b></span>
+      <span class="qz-score">Score <b data-score>0</b><span data-game> · <b data-run-xp>0</b> XP</span></span>
     </div>
     <div class="progress-bar"><span data-qbar></span></div>
 
     {
       quiz.questions.map((item, i) => (
-        <article class="qz-q card" data-q={i} data-answer={item.answer} hidden>
+        <article class="qz-q card" data-q={i} data-type={item.type ?? 'mcq'} data-answer={item.answer} hidden>
+          {item.type === 'estimate' && (
+            <div class="qz-kind">
+              <span>🧮 Estimation</span>
+              <span class="qz-timer" data-timer data-speed={item.speedSec ?? 60}>
+                <Icon name="clock" size={13} /> <b>0</b>s<span data-game> · bonus under {item.speedSec ?? 60}s</span>
+              </span>
+            </div>
+          )}
+          {item.type === 'tradeoff' && <div class="qz-kind"><span>⚔️ Trade-off duel</span></div>}
           <h3 set:html={inline(item.q)} />
           {item.code && (
             <div class="qz-code" data-no-copy>
               <Code code={item.code.trim()} lang="java" themes={{ light: 'github-light', dark: 'github-dark-dimmed' }} defaultColor={false} />
             </div>
           )}
-          <div class="qz-opts" role="group">
-            {item.options.map((opt, oi) => (
-              <button type="button" class="qz-opt" data-opt={oi}>
-                <span class="qz-letter">{String.fromCharCode(65 + oi)}</span>
-                <span set:html={inline(opt)} />
-              </button>
-            ))}
-          </div>
+
+          {(item.type ?? 'mcq') === 'mcq' && 'options' in item && (
+            <div class="qz-opts" role="group">
+              {item.options.map((opt, oi) => (
+                <button type="button" class="qz-opt" data-opt={oi}>
+                  <span class="qz-letter">{String.fromCharCode(65 + oi)}</span>
+                  <span set:html={inline(opt)} />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {item.type === 'estimate' && (
+            <>
+              {item.given && (
+                <ul class="qz-given">
+                  {item.given.map((g) => (
+                    <li set:html={inline(g)} />
+                  ))}
+                </ul>
+              )}
+              <form class="qz-est" data-est>
+                <label class="qz-est-field">
+                  <input type="text" inputmode="decimal" autocomplete="off" placeholder="e.g. 1.5k, 2M, 3e9" aria-label={`Your estimate in ${item.unit}`} data-input />
+                  <span class="qz-unit">{item.unit}</span>
+                </label>
+                <button type="submit" class="btn btn-primary" data-lock>Lock in</button>
+              </form>
+              <p class="qz-err" data-err hidden>Enter a positive number, optionally with k / M / B / T.</p>
+            </>
+          )}
+
+          {item.type === 'tradeoff' && (
+            <>
+              {item.constraint && (
+                <p class="qz-constraint">
+                  <b>Constraint</b> <span set:html={inline(item.constraint)} />
+                </p>
+              )}
+              <div class="qz-duel" role="radiogroup" aria-label="Pick a side">
+                {item.options.map((opt, oi) => (
+                  <>
+                    {oi === 1 && <span class="qz-vs">VS</span>}
+                    <button type="button" class="qz-side" role="radio" aria-checked="false" data-side={oi}>
+                      <span set:html={inline(opt)} />
+                    </button>
+                  </>
+                ))}
+              </div>
+              <p class="qz-sub">Why? Tick every reason that justifies the right call.</p>
+              <div class="qz-reasons">
+                {item.reasons.map((r) => (
+                  <label class="qz-reason" data-valid={String(r.valid)}>
+                    <input type="checkbox" />
+                    <span set:html={inline(r.text)} />
+                  </label>
+                ))}
+              </div>
+              <div class="qz-lock-row">
+                <button type="button" class="btn btn-primary" data-lock disabled>Lock in</button>
+              </div>
+            </>
+          )}
+
           <div class="qz-explain" hidden>
             <strong class="qz-verdict" />
+            <span class="qz-xp-gain" data-game />
+            <p class="qz-detail" hidden />
             <p set:html={inline(item.explain)} />
           </div>
         </article>
@@ -61,6 +134,7 @@ const total = quiz.questions.length;
     <div class="ring" data-ring><span data-pct>0%</span></div>
     <h2 data-verdict>Nice work</h2>
     <p>You scored <b data-final>0</b> out of {total}.</p>
+    <p class="qz-xp-total" data-game>+<b data-final-xp>0</b> XP this attempt <span data-xp-best></span></p>
     <div class="qz-result-actions">
       <button class="btn btn-primary" data-retry><Icon name="shuffle" size={14} /> Try again</button>
       <a class="btn" href="/quiz/">All quizzes</a>
@@ -71,6 +145,15 @@ const total = quiz.questions.length;
 
 <script>
   import { progress } from '../scripts/progress';
+  import { XP, formatAmount, parseAmount, recordQuiz, scoreEstimate, scoreTradeoff, stats } from '../scripts/game';
+
+  const shuffle = <T,>(a: T[]) => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
 
   document.querySelectorAll<HTMLElement>('[data-quiz]').forEach((root) => {
     const id = root.dataset.quiz!;
@@ -82,13 +165,18 @@ const total = quiz.questions.length;
     let order: number[] = [];
     let pos = 0;
     let score = 0;
+    let runXp = 0;
+    let hits = { bullseyes: [] as string[], tradeoffs: [] as string[], speedy: [] as string[] };
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let shownAt = 0;
 
     const showBest = () => {
       const best = progress.quizScores()[id];
       const el = root.querySelector<HTMLElement>('[data-best]')!;
       if (best) {
         el.hidden = false;
-        el.textContent = `Your best: ${best.best}/${best.total} · last attempt: ${best.last}/${best.total}`;
+        const bestXp = stats().quizXp[id];
+        el.textContent = `Your best: ${best.best}/${best.total} · last attempt: ${best.last}/${best.total}${bestXp ? ` · best ${bestXp} XP` : ''}`;
       }
     };
 
@@ -97,7 +185,44 @@ const total = quiz.questions.length;
         b.disabled = false;
         b.className = 'qz-opt';
       });
+      q.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => {
+        b.disabled = false;
+        b.className = 'qz-side';
+        b.setAttribute('aria-checked', 'false');
+      });
+      q.querySelectorAll<HTMLLabelElement>('.qz-reason').forEach((l) => {
+        l.className = 'qz-reason';
+        const box = l.querySelector('input')!;
+        box.checked = false;
+        box.disabled = false;
+      });
+      const reasons = q.querySelector('.qz-reasons');
+      if (reasons) shuffle([...reasons.children]).forEach((c) => reasons.appendChild(c));
+      const input = q.querySelector<HTMLInputElement>('[data-input]');
+      if (input) {
+        input.value = '';
+        input.disabled = false;
+      }
+      q.querySelectorAll<HTMLButtonElement>('[data-lock]').forEach((b) => (b.disabled = q.dataset.type === 'tradeoff'));
+      q.querySelector<HTMLElement>('[data-err]')?.setAttribute('hidden', '');
       q.querySelector<HTMLElement>('.qz-explain')!.hidden = true;
+      q.querySelector<HTMLElement>('.qz-detail')!.hidden = true;
+    }
+
+    function startTimer(q: HTMLElement) {
+      clearInterval(timer);
+      shownAt = performance.now();
+      const el = q.querySelector<HTMLElement>('[data-timer]');
+      if (!el) return;
+      const b = el.querySelector('b')!;
+      const limit = Number(el.dataset.speed);
+      el.classList.remove('late');
+      b.textContent = '0';
+      timer = setInterval(() => {
+        const sec = Math.floor((performance.now() - shownAt) / 1000);
+        b.textContent = String(sec);
+        el.classList.toggle('late', sec > limit);
+      }, 250);
     }
 
     function show() {
@@ -107,42 +232,145 @@ const total = quiz.questions.length;
       q.hidden = false;
       root.querySelector('[data-qnum]')!.textContent = String(pos + 1);
       root.querySelector('[data-score]')!.textContent = String(score);
+      root.querySelector('[data-run-xp]')!.textContent = String(runXp);
       root.querySelector<HTMLElement>('[data-qbar]')!.style.width = `${(pos / total) * 100}%`;
       nextBtn.disabled = true;
       nextBtn.firstChild!.textContent = pos === total - 1 ? 'See results ' : 'Next question ';
+      startTimer(q);
+      q.querySelector<HTMLInputElement>('[data-input]')?.focus({ preventScroll: true });
     }
 
     function start() {
-      order = questions.map((_, i) => i).sort(() => Math.random() - 0.5);
+      order = shuffle(questions.map((_, i) => i));
       pos = 0;
       score = 0;
+      runXp = 0;
+      hits = { bullseyes: [], tradeoffs: [], speedy: [] };
       stage('run');
       show();
       root.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    /** Common feedback once a question is answered. */
+    function finish(q: HTMLElement, correct: boolean, xp: number, verdict: string, detail?: string) {
+      clearInterval(timer);
+      if (correct) score++;
+      runXp += xp;
+      const ex = q.querySelector<HTMLElement>('.qz-explain')!;
+      ex.hidden = false;
+      ex.classList.toggle('is-correct', correct);
+      ex.querySelector('.qz-verdict')!.textContent = verdict;
+      ex.querySelector('.qz-xp-gain')!.textContent = xp ? `+${xp} XP` : '';
+      const d = ex.querySelector<HTMLElement>('.qz-detail')!;
+      if (detail) {
+        d.hidden = false;
+        d.innerHTML = detail;
+      }
+      root.querySelector('[data-score]')!.textContent = String(score);
+      root.querySelector('[data-run-xp]')!.textContent = String(runXp);
+      nextBtn.disabled = false;
+      nextBtn.focus({ preventScroll: true });
+    }
+
     questions.forEach((q) => {
       const answer = Number(q.dataset.answer);
+      const key = `${id}:${q.dataset.q}`;
+
+      // Multiple choice
       q.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((btn) =>
         btn.addEventListener('click', () => {
           const chosen = Number(btn.dataset.opt);
           const correct = chosen === answer;
-          if (correct) score++;
           q.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => {
             b.disabled = true;
             const i = Number(b.dataset.opt);
             if (i === answer) b.classList.add('correct');
             else if (i === chosen) b.classList.add('wrong');
           });
-          const ex = q.querySelector<HTMLElement>('.qz-explain')!;
-          ex.hidden = false;
-          ex.classList.toggle('is-correct', correct);
-          ex.querySelector('.qz-verdict')!.textContent = correct ? 'Correct!' : 'Not quite.';
-          root.querySelector('[data-score]')!.textContent = String(score);
-          nextBtn.disabled = false;
-          nextBtn.focus({ preventScroll: true });
+          finish(q, correct, correct ? XP.mcq : 0, correct ? 'Correct!' : 'Not quite.');
         }),
       );
+
+      // Estimation
+      const form = q.querySelector<HTMLFormElement>('[data-est]');
+      form?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = form.querySelector<HTMLInputElement>('[data-input]')!;
+        if (input.disabled) return;
+        const guess = parseAmount(input.value);
+        const err = q.querySelector<HTMLElement>('[data-err]')!;
+        if (!(guess > 0)) {
+          err.hidden = false;
+          return;
+        }
+        err.hidden = true;
+        input.disabled = true;
+        form.querySelector<HTMLButtonElement>('[data-lock]')!.disabled = true;
+        const sec = (performance.now() - shownAt) / 1000;
+        const limit = Number(q.querySelector<HTMLElement>('[data-timer]')?.dataset.speed ?? 60);
+        const r = scoreEstimate(guess, answer);
+        const fast = r.correct && sec <= limit;
+        let xp = r.xp;
+        if (fast) {
+          xp += XP.estimate.speed;
+          hits.speedy.push(key);
+        }
+        if (r.tier === 'bullseye') hits.bullseyes.push(key);
+        const unit = q.querySelector('.qz-unit')!.textContent;
+        const verdict = { bullseye: '🎯 Bullseye!', close: '✅ Close enough!', ballpark: '🟡 Right ballpark, but over 2× off.', miss: '❌ Way off.' }[r.tier];
+        const off = r.ratio === 1 ? 'spot on' : `${r.ratio.toFixed(1)}× ${guess > answer ? 'high' : 'low'}`;
+        finish(
+          q,
+          r.correct,
+          xp,
+          verdict,
+          `You said <b>${formatAmount(guess)} ${unit}</b> · reference <b>${formatAmount(answer)} ${unit}</b> · ${off} · ${Math.round(sec)}s${fast ? ' ⚡ speed bonus' : ''}`,
+        );
+      });
+
+      // Trade-off duel
+      const sides = [...q.querySelectorAll<HTMLButtonElement>('[data-side]')];
+      const lock = q.dataset.type === 'tradeoff' ? q.querySelector<HTMLButtonElement>('[data-lock]') : null;
+      let side = -1;
+      sides.forEach((b) =>
+        b.addEventListener('click', () => {
+          side = Number(b.dataset.side);
+          sides.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+          lock!.disabled = false;
+        }),
+      );
+      lock?.addEventListener('click', () => {
+        const labels = [...q.querySelectorAll<HTMLLabelElement>('.qz-reason')];
+        const picked = labels.map((l) => l.querySelector('input')!.checked);
+        const valid = labels.map((l) => l.dataset.valid === 'true');
+        const callRight = side === answer;
+        const r = scoreTradeoff(callRight, picked, valid);
+        if (r.perfect) hits.tradeoffs.push(key);
+        lock.disabled = true;
+        sides.forEach((b) => {
+          b.disabled = true;
+          const i = Number(b.dataset.side);
+          if (i === answer) b.classList.add('correct');
+          else if (i === side) b.classList.add('wrong');
+        });
+        labels.forEach((l, i) => {
+          l.querySelector('input')!.disabled = true;
+          if (valid[i]) l.classList.add(picked[i] ? 'hit' : 'missed');
+          else if (picked[i]) l.classList.add('wrong');
+        });
+        const verdict = r.perfect
+          ? '🏆 Duel won — right call, right reasons.'
+          : callRight
+            ? 'Right call, but the reasoning needs work.'
+            : 'Wrong call.';
+        finish(
+          q,
+          r.perfect,
+          r.xp,
+          verdict,
+          `Reasons: <b>${r.hits}/${r.validCount}</b> valid picked${r.wrong ? ` · <b>${r.wrong}</b> invalid picked` : ''}. Green = valid reason, red = invalid.`,
+        );
+      });
     });
 
     nextBtn.addEventListener('click', () => {
@@ -151,9 +379,16 @@ const total = quiz.questions.length;
         show();
         return;
       }
+      const prevBest = stats().quizXp[id] ?? 0;
+      // Record XP first: the score write is what makes the quiz count, so the
+      // XP toast fires once with the full total.
+      recordQuiz(id, runXp, hits);
       progress.saveQuiz(id, score, total);
       const pct = Math.round((score / total) * 100);
       root.querySelector('[data-final]')!.textContent = String(score);
+      root.querySelector('[data-final-xp]')!.textContent = String(runXp);
+      root.querySelector('[data-xp-best]')!.textContent =
+        runXp > prevBest && prevBest > 0 ? `· new personal best! (was ${prevBest})` : prevBest ? `· best ${Math.max(prevBest, runXp)}` : '';
       root.querySelector('[data-pct]')!.textContent = `${pct}%`;
       root.querySelector<HTMLElement>('[data-ring]')!.style.setProperty('--pct', String(pct));
       root.querySelector('[data-verdict]')!.textContent =
@@ -342,6 +577,207 @@ const total = quiz.questions.length;
     flex-wrap: wrap;
     justify-content: center;
     gap: 10px;
+  }
+  .qz-kind {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font: 600 12px/1 var(--font-sans);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .qz-timer {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .qz-timer b {
+    font-family: var(--font-mono);
+    color: var(--text);
+  }
+  .qz-timer:global(.late) b {
+    color: var(--warn);
+  }
+  .qz-given {
+    margin: 0 0 16px;
+    padding: 12px 16px 12px 32px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text-soft);
+    font-size: 14.5px;
+  }
+  .qz-given li + li {
+    margin-top: 4px;
+  }
+  .qz-est {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .qz-est-field {
+    flex: 1 1 220px;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .qz-est-field:focus-within {
+    border-color: var(--accent);
+  }
+  .qz-est-field input {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 14px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font: 500 16px var(--font-mono);
+  }
+  .qz-unit {
+    padding: 0 14px;
+    color: var(--muted);
+    font: 600 13px var(--font-mono);
+  }
+  .qz-err {
+    margin: 8px 0 0;
+    color: var(--err);
+    font-size: 13.5px;
+  }
+  .qz-constraint {
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent);
+    background: color-mix(in srgb, var(--warn) 7%, transparent);
+    font-size: 14.5px;
+    color: var(--text-soft);
+  }
+  .qz-constraint b {
+    color: var(--warn);
+    margin-right: 6px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .qz-duel {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .qz-vs {
+    align-self: center;
+    font: 800 13px var(--font-mono);
+    color: var(--muted);
+  }
+  .qz-side {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1.5px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font: 600 15.5px/1.4 var(--font-sans);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .qz-side:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .qz-side[aria-checked='true'] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  }
+  .qz-side:disabled {
+    cursor: default;
+  }
+  .qz-side:global(.correct) {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 12%, var(--surface-2));
+  }
+  .qz-side:global(.wrong) {
+    border-color: var(--err);
+    background: color-mix(in srgb, var(--err) 10%, var(--surface-2));
+  }
+  .qz-sub {
+    margin: 18px 0 8px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .qz-reasons {
+    display: grid;
+    gap: 6px;
+  }
+  .qz-reason {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 14.5px;
+    color: var(--text-soft);
+    cursor: pointer;
+  }
+  .qz-reason input {
+    margin-top: 4px;
+    accent-color: var(--accent);
+  }
+  .qz-reason:global(.hit) {
+    border-color: var(--ok);
+    color: var(--text);
+  }
+  .qz-reason:global(.missed) {
+    border-color: var(--ok);
+    border-style: dashed;
+  }
+  .qz-reason:global(.wrong) {
+    border-color: var(--err);
+    background: color-mix(in srgb, var(--err) 8%, var(--surface-2));
+  }
+  .qz-lock-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+  }
+  .qz-lock-row .btn:disabled,
+  .qz-est .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .qz-xp-gain {
+    margin-left: 8px;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--brand-2);
+  }
+  .qz-detail {
+    font-family: var(--font-mono);
+    font-size: 13px !important;
+  }
+  .qz-detail :global(b) {
+    color: var(--text);
+  }
+  .qz-xp-total b {
+    color: var(--brand-2);
+  }
+  @media (max-width: 560px) {
+    .qz-duel {
+      grid-template-columns: 1fr;
+    }
+    .qz-vs {
+      justify-self: center;
+    }
   }
   [hidden] {
     display: none !important;

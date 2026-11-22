@@ -103,7 +103,7 @@ const features = [
 
   <section class="container block">
     <span class="eyebrow">Learning paths</span>
-    <h2 class="section-title">Three tracks. One coherent path.</h2>
+    <h2 class="section-title">{tracks.length} tracks. One coherent path.</h2>
     <p class="section-sub">Go from language fundamentals to production Spring services and the architecture vocabulary senior engineers use.</p>
     <div class="tracks">
       {
@@ -345,7 +345,7 @@ const features = [
   }
   .tracks {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 18px;
     margin-top: 32px;
   }

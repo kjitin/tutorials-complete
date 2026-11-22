@@ -478,3 +478,62 @@ pre:has(> code.language-mermaid) {
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   Gamification toasts (XP, level-ups, badges) — see scripts/global.ts
+   ========================================================================== */
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.45);
+  font-size: 14px;
+  color: var(--text);
+  animation: toast-in 0.25s ease-out;
+}
+.toast.out {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.toast .t-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+.toast small {
+  display: block;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.toast.xp b {
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+html[data-game-off] .toasts,
+html[data-game-off] [data-game] {
+  display: none !important;
+}
