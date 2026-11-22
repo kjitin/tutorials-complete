@@ -1,0 +1,103 @@
+---
+import { SignIn, Show } from '@clerk/astro/components';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/Icon.astro';
+---
+
+<BaseLayout title="Sign in" description="Sign in to StackWise with your Google account.">
+  <meta slot="head" name="robots" content="noindex" />
+  <section class="login bg-grid">
+    <div class="container login-grid">
+      <div class="login-copy">
+        <span class="eyebrow">Account</span>
+        <h1>Sign in to <span class="gradient-text">StackWise</span></h1>
+        <p>Use your existing Google account — no new password to remember.</p>
+        <ul>
+          <li><Icon name="check" size={16} /> Your name and avatar in the header</li>
+          <li><Icon name="check" size={16} /> Progress, XP and badges stay in this browser for now</li>
+        </ul>
+      </div>
+      <div class="login-widget">
+        <Show when="signed-out">
+          <SignIn routing="hash" />
+        </Show>
+        <Show when="signed-in">
+          <div class="card signed-in">
+            <Icon name="check" size={22} />
+            <p>You're signed in.</p>
+            <a class="btn btn-primary" href="/progress/">View my progress <Icon name="arrow-right" size={14} /></a>
+          </div>
+        </Show>
+        <noscript><p class="note">Sign-in needs JavaScript enabled.</p></noscript>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .login {
+    min-height: calc(100vh - var(--header-h) - 200px);
+    padding: 64px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .login-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 48px;
+    align-items: center;
+  }
+  h1 {
+    font-size: clamp(32px, 5vw, 48px);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    margin: 0 0 14px;
+  }
+  .login-copy p {
+    font-size: 17.5px;
+    color: var(--text-soft);
+    margin: 0 0 20px;
+  }
+  .login-copy ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+    color: var(--text-soft);
+  }
+  .login-copy li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .login-copy li :global(svg) {
+    color: var(--ok);
+  }
+  .login-widget {
+    min-width: min(400px, 100%);
+    min-height: 360px;
+    display: grid;
+    place-items: center;
+  }
+  .signed-in {
+    padding: 32px;
+    text-align: center;
+    color: var(--ok);
+  }
+  .signed-in p {
+    color: var(--text);
+    font-weight: 600;
+    margin: 8px 0 16px;
+  }
+  .note {
+    color: var(--muted);
+  }
+  @media (max-width: 860px) {
+    .login-grid {
+      grid-template-columns: 1fr;
+    }
+    .login-widget {
+      min-width: 0;
+    }
+  }
+</style>
