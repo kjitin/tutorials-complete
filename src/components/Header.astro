@@ -1,4 +1,5 @@
 ---
+import { Show, UserButton } from '@clerk/astro/components';
 import Icon from './Icon.astro';
 import { SITE } from '../site.config';
 
@@ -64,13 +65,21 @@ const active = (href: string) => path.startsWith(href);
         <span class="xp-num"><b data-xp-num>0</b> XP</span>
         <span class="xp-streak" data-xp-streak hidden><Icon name="flame" size={13} /><b></b></span>
       </a>
-      <a href="/progress/" class="icon-btn" aria-label="My progress" title="My progress">
+      <a href="/progress/" class="icon-btn progress-link" aria-label="My progress" title="My progress">
         <Icon name="chart" size={18} />
       </a>
       <button class="icon-btn" data-theme-toggle aria-label="Toggle colour theme" title="Toggle theme">
         <span class="theme-dark"><Icon name="moon" size={18} /></span>
         <span class="theme-light"><Icon name="sun" size={18} /></span>
       </button>
+      <div class="account">
+        <Show when="signed-out">
+          <a href="/login/" class="btn btn-sm signin-btn" data-signin>Sign in</a>
+        </Show>
+        <Show when="signed-in">
+          <UserButton id="header-user" />
+        </Show>
+      </div>
     </div>
   </div>
 </header>
@@ -95,6 +104,14 @@ const active = (href: string) => path.startsWith(href);
     <slot name="drawer" />
   </div>
 </div>
+
+<script>
+  // Send people back to the page they were on after signing in.
+  document.querySelectorAll<HTMLAnchorElement>('[data-signin]').forEach((a) => {
+    if (location.pathname.startsWith('/login')) return;
+    a.href = `/login/?redirect_url=${encodeURIComponent(location.href)}`;
+  });
+</script>
 
 <style>
   .site-header {
@@ -252,6 +269,15 @@ const active = (href: string) => path.startsWith(href);
     color: var(--text);
   }
 
+  .account {
+    display: grid;
+    place-items: center;
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .signin-btn {
+    white-space: nowrap;
+  }
   .xp-pill {
     display: flex;
     align-items: center;
@@ -315,6 +341,13 @@ const active = (href: string) => path.startsWith(href);
     }
     .xp-pill {
       padding-right: 4px;
+    }
+    /* The XP pill and the drawer both link to /progress, so drop the icon to fit "Sign in". */
+    .progress-link {
+      display: none;
+    }
+    .actions {
+      gap: 4px;
     }
     .mobile-only {
       display: grid;
